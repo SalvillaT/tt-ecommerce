@@ -20,26 +20,32 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 
 **Objetivo:** fijar el comportamiento antes de provisionar o transformar datos.
 
+**Estado: CERRADA (2026-11-02).** Especificación v1: [contratos y acta](fase-0/CONTRATOS.md#acta-de-decisiones-f0-v1), [métricas y calidad](fase-0/METRICAS_Y_CALIDAD.md), [linaje y privacidad](fase-0/LINAJE_Y_PRIVACIDAD.md).
+
 **Dependencias:** ninguna.
 
 **Tareas unitarias**
 
-1. Definir para `orders`, `customers` y `products`: propietario, clave, tipos, campos obligatorios, semántica de estados, frecuencia y SLA inicial. El grano inicial de pedidos será línea de pedido (`order_id` + `line_id`), sujeto a validación del contrato.
-2. Documentar linaje desde cada archivo sintético a Bronze, Silver, cuarentena y métrica Gold.
-3. Crear un generador determinista con semilla y manifiesto de lote: pedidos JSON, clientes CSV y catálogo CSV; incluir duplicados, correcciones, cancelaciones/reembolsos, nulos, fechas tardías y un campo inesperado.
-4. Definir reglas de calidad: unicidad de línea de pedido (`order_id` + `line_id`), integridad referencial, rango de importe/cantidad, fechas válidas, completitud y regla explícita por cada nulo permitido o rechazado.
-5. Acordar definición de ingresos, pedido contado, fecha de negocio y ventana de refresco Gold. Como punto de partida, ingresos agrega líneas completadas y pedidos cuenta `order_id` distinto; devoluciones/correcciones actualizan el estado vigente de la línea mediante versión/evento.
-6. Definir criterios iniciales para no publicar grupos pequeños (por ejemplo, umbral configurable, supresión o generalización), sin asumir que una única técnica elimina el riesgo de reidentificación.
+1. **Completado:** definir para `orders`, `customers` y `products` propietario, clave, tipos, campos obligatorios, semántica de estados, frecuencia y SLA objetivo. El grano acordado es línea de pedido (`order_id` + `line_id`).
+2. **Completado:** documentar linaje desde cada archivo sintético a Bronze, Silver, cuarentena y métrica Gold.
+3. **Completado:** crear un generador determinista con semilla y manifiesto de lote: pedidos JSON, clientes CSV y catálogo CSV; incluir duplicados, correcciones, cancelaciones/reembolsos, nulos, fechas tardías y un campo inesperado.
+4. **Completado:** definir reglas de calidad: unicidad de línea de pedido (`order_id` + `line_id`), integridad referencial, rango de importe/cantidad, fechas válidas, completitud y regla explícita por cada nulo permitido o rechazado.
+5. **Completado:** acordar ingresos netos según versión/estado vigente, pedido contado, fecha de negocio `Europe/Madrid` y reproceso de 7 días más fechas afectadas.
+6. **Completado:** acordar publicación Gold únicamente para celdas canónicas con al menos 5 `customer_id` distintos y sin roll-ups solapados; no se asume que el criterio elimine el riesgo de reidentificación.
 
 **Entregables:** contratos versionados, diccionario de datos, especificación del generador y matriz de calidad/linaje.
 
 **Aceptación verificable:** una persona distinta puede regenerar el mismo lote desde la semilla; cada campo tiene tipo, nulabilidad y propietario; las métricas Gold tienen definición y ventana; se documenta el destino de cada fila inválida.
+
+**Cierre y evidencia:** contratos, diccionario, reglas, linaje, generador, fixture `DEMO-001` (semilla 42, checksums en manifiesto) y CLI disponibles. La ejecución `py -m unittest discover -s tests -v` registró **42 tests** correctos. Se cumplen los criterios de aceptación de Fase 0 como especificación y evidencia local sintética; no implica jobs, tablas Gold, controles Unity Catalog ni recursos Azure desplegados. Fase 1 queda pendiente.
 
 ---
 
 ### Fase 1 — Fundaciones Azure, Terraform e identidad
 
 **Objetivo:** preparar una base mínima, auditable y costeable para el lakehouse.
+
+**Estado: PENDIENTE.**
 
 **Dependencias:** Fase 0; acceso administrativo aprobado a Azure y Databricks.
 
@@ -179,9 +185,9 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 
 ## Hitos de decisión abiertos
 
-1. Confirmar tenant, región, presupuesto, capacidad administrativa y patrón de red permitido.
+1. Confirmar tenant, región **cloud** (distinta de la zona comercial `Europe/Madrid` ya acordada), presupuesto, capacidad administrativa y patrón de red permitido.
 2. Elegir el backend remoto y el mecanismo de bloqueo de Terraform conforme a estándares del entorno.
 3. Validar la configuración concreta de Unity Catalog y qué partes puede automatizar la versión de provider disponible.
-4. Acordar SLA de frescura, volumen sintético objetivo, definición de reembolso e ingresos y umbral de publicación Gold.
+4. Definir volumen objetivo y dimensionamiento de infraestructura; el SLA objetivo, ingresos, ventana de reproceso y umbral Gold ya se acordaron en Fase 0, pero no se han medido ni implementado.
 5. Decidir si Power BI necesita DirectQuery; el punto de partida es Import por simplicidad y control de coste.
 6. Definir políticas de retención/borrado y el responsable de aprobar cualquier uso futuro de datos no sintéticos.

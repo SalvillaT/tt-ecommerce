@@ -1,0 +1,8 @@
+product_id,record_version,updated_at,name,brand,category,list_price_eur,currency,active
+PRD-PALA-01,1,2026-01-01T08:00:00Z,Control Pro,TT Demo,paddle,30.00,EUR,true
+PRD-PALA-02,1,2026-01-01T08:00:00Z,Power X,TT Demo,paddle,55.00,EUR,true
+PRD-RUB-01,1,2026-01-01T08:00:00Z,Spin Red,TT Demo,rubber,12.50,EUR,true
+PRD-BAL-01,1,2026-01-01T08:00:00Z,Match Balls,TT Demo,ball,2.90,EUR,true
+PRD-TAB-01,1,2026-01-01T08:00:00Z,Pro Table,TT Demo,table,130.00,EUR,true
+PRD-NET-01,1,2026-01-01T08:00:00Z,Net Set,TT Demo,net,18.00,EUR,true
+PRD-ACC-01,1,2026-01-01T08:00:00Z,Grip Tape,TT Demo,accessory,6.25,EUR,true

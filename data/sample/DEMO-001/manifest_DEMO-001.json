@@ -1,0 +1,91 @@
+{
+  "contract_version": "v1",
+  "generator_version": "1.0.0",
+  "batch_id": "DEMO-001",
+  "seed": 42,
+  "scenarios": [
+    {
+      "scenario": "baseline_valid",
+      "rule": null,
+      "subject": "ORD-BASE-A01..A05 | ORD-BASE-B01..B03"
+    },
+    {
+      "scenario": "exact_duplicate",
+      "rule": "ORD-006",
+      "subject": "ORD-DUP-01"
+    },
+    {
+      "scenario": "later_correction",
+      "rule": null,
+      "subject": "ORD-CORR-01"
+    },
+    {
+      "scenario": "cancellation",
+      "rule": null,
+      "subject": "ORD-CANC-01"
+    },
+    {
+      "scenario": "partial_refund",
+      "rule": null,
+      "subject": "ORD-REF-01"
+    },
+    {
+      "scenario": "full_refund",
+      "rule": null,
+      "subject": "ORD-REF-02"
+    },
+    {
+      "scenario": "late_event",
+      "rule": null,
+      "subject": "ORD-LATE-01"
+    },
+    {
+      "scenario": "allowed_null",
+      "rule": "CUS-002",
+      "subject": "CUS-SOS-NOPHONE"
+    },
+    {
+      "scenario": "rejected_null",
+      "rule": "ORD-001|CUS-001",
+      "subject": "ORD-NULL-01 | CUS-NULL-EMAIL"
+    },
+    {
+      "scenario": "orphan_reference",
+      "rule": "ORD-005",
+      "subject": "ORD-ORPH-01"
+    },
+    {
+      "scenario": "extra_json_field",
+      "rule": "SCH-001",
+      "subject": "ORD-EXTRA-01"
+    },
+    {
+      "scenario": "malformed_json",
+      "rule": "SCH-002",
+      "subject": "ORD-MALF-01"
+    },
+    {
+      "scenario": "version_conflict",
+      "rule": "ORD-002",
+      "subject": "ORD-CONF-01"
+    }
+  ],
+  "files": [
+    {
+      "file": "orders_DEMO-001.jsonl",
+      "rows": 26,
+      "sha256": "039e1bd6bd09f6edf58d66633199bc0aad07a6d96eaa9897be5eddc11fecce38"
+    },
+    {
+      "file": "customers_DEMO-001.csv",
+      "rows": 11,
+      "sha256": "b0d1b312872e45d58cfed8b7b31c2905adae37d51cc9a57805167cd7ee72e64a"
+    },
+    {
+      "file": "products_DEMO-001.csv",
+      "rows": 7,
+      "sha256": "dd1bca932cbccb13f19f79ebbb894aa2f642a0b66e93c0b7ef94d69cf25c9b42"
+    }
+  ],
+  "total_rows": 44
+}

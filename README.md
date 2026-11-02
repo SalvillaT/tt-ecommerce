@@ -2,7 +2,7 @@
 
 Proyecto de portfolio para diseñar un e-commerce ficticio de material de tenis de mesa y su plataforma analítica gobernada en Azure. El objetivo no es operar una tienda real: es demostrar cómo transformar eventos de venta sintéticos en métricas fiables para negocio, manteniendo el acceso a datos personales bajo control.
 
-> **Estado actual:** documentación y diseño inicial. No se han creado recursos de Azure, datos, notebooks, Terraform ni dashboards todavía.
+> **Estado actual:** Fase 0 cerrada: documentación, generador de datos sintéticos, fixture de ejemplo y pruebas locales. No se han desplegado recursos de Azure ni creado notebooks, Terraform o dashboards todavía.
 
 ## Problema y narrativa comercial
 
@@ -18,7 +18,7 @@ La fuente operativa se simulará con archivos o eventos de pedidos, clientes y c
 
 ### MVP
 
-- Datos **sintéticos** reproducibles: pedidos JSON y archivos CSV de clientes y catálogo, con casos de duplicados, anulaciones, nulos y cambios de esquema controlados.
+- Datos **sintéticos** reproducibles: pedidos JSONL y archivos CSV de clientes y catálogo, con casos de duplicados, anulaciones, nulos y cambios de esquema controlados.
 - Lago en ADLS Gen2 y carga incremental a Delta Bronze mediante Databricks Auto Loader, con checkpoints y captura de registros no interpretados (`rescued data`).
 - Transformaciones PySpark a Silver: contrato de esquema, tipado, deduplicación idempotente, reglas de calidad, cuarentena y columnas de auditoría.
 - Unity Catalog para gobernanza: catálogos/esquemas, permisos mínimos y políticas de enmascaramiento dinámico de email y teléfono para grupos concretos.
@@ -66,7 +66,7 @@ Flujo esperado:
 | `customers` | `customer_id`, país/región, email, teléfono, fechas de auditoría | Relación con cliente; datos de contacto sintéticos y restringidos. |
 | `products` | `product_id`, nombre, categoría, marca, precio | Dimensión de catálogo: palas, gomas, pelotas, mesas y accesorios. |
 
-La deduplicación de pedidos se definirá sobre `order_id` + `line_id` y una versión/marca temporal de evento; una corrección o devolución debe sustituir el estado vigente de esa línea sin borrar la evidencia Bronze. Las métricas de ingresos usarán líneas completadas conforme a la definición acordada, mientras que los pedidos se contarán como `count(distinct order_id)` para no inflarlos por número de líneas. Las claves, formatos, volumen y semántica definitiva se documentarán como contratos antes de implementar. Los datos sintéticos no deben copiar identidades ni contactos reales.
+La deduplicación de pedidos se definirá sobre `order_id` + `line_id` y una versión/marca temporal de evento; una corrección o devolución debe sustituir el estado vigente de esa línea sin borrar la evidencia Bronze. Las métricas de ingresos usarán el neto de las versiones vigentes y estados definidos en el contrato, mientras que los pedidos se contarán como `count(distinct order_id)` para no inflarlos por número de líneas. Las claves, formatos y semántica están documentados en la Fase 0; el volumen de infraestructura se decidirá antes de desplegar. Los datos sintéticos no deben copiar identidades ni contactos reales.
 
 ## Capas, consumidores y acceso
 
@@ -113,9 +113,20 @@ Gold evitará publicar PII por diseño. Eso no garantiza que un agregado de baja
 - La topología final, SKU, horarios de apagado, retención y tamaño de cómputo se decidirán tras una estimación de volumen y presupuesto. Se priorizarán jobs efímeros, límites de coste y apagado del SQL Warehouse.
 - Algunas operaciones de Databricks/Azure pueden requerir pasos administrativos o no estar disponibles en la versión del provider elegida; se comprobarán en el momento de despliegue en vez de asumir soporte total.
 
-## Ejecución prevista
+## Probar la fase 0 en local
 
-Cuando se implemente, el repositorio documentará los comandos y variables exactos. A alto nivel, la ejecución será:
+Requiere Python 3.13; el generador y sus pruebas solo usan la biblioteca estándar. En Windows, desde la raíz del repositorio:
+
+```powershell
+py scripts/generate_synthetic_data.py --seed 42 --batch-id DEMO-001
+py -m unittest discover -s tests -v
+```
+
+En macOS/Linux se puede sustituir `py` por `python3`. El lote se guarda en `data/generated/DEMO-001/` (ignorado por Git); `data/sample/DEMO-001/` contiene un ejemplo versionado reproducible con la misma semilla. **Contiene anomalías deliberadas** —incluida una línea JSON malformada— para probar reglas de calidad; no debe tratarse como fuente completamente válida ni contiene contactos reales. Los importes, métricas y reglas esperadas se especifican en [fase 0](docs/fase-0/CONTRATOS.md).
+
+## Ejecución prevista en Azure
+
+Cuando se implemente la infraestructura, el repositorio documentará sus comandos y variables exactos. A alto nivel, la ejecución será:
 
 1. Configurar suscripción/tenant, identidades, backend de Terraform y permisos requeridos.
 2. Aplicar infraestructura revisada y configurar el metastore/Unity Catalog según los prerrequisitos validados.
@@ -123,8 +134,8 @@ Cuando se implemente, el repositorio documentará los comandos y variables exact
 4. Ejecutar Silver, revisar cuarentena y métricas de calidad; solo entonces refrescar Gold.
 5. Probar permisos con cada identidad de prueba y conectar Power BI al SQL Warehouse autorizado.
 
-No hay comandos ejecutables ni recursos desplegados aún.
+No hay recursos desplegados aún; los comandos anteriores solo generan y verifican datos locales.
 
 ## Roadmap
 
-El plan por fases, dependencias, entregables y criterios verificables está en [docs/PLAN_DE_DESARROLLO.md](docs/PLAN_DE_DESARROLLO.md).
+El plan por fases, dependencias, entregables y criterios verificables está en [docs/PLAN_DE_DESARROLLO.md](docs/PLAN_DE_DESARROLLO.md). La Fase 0 cerrada se divide en [contratos de datos y acta de decisiones v1](docs/fase-0/CONTRATOS.md#acta-de-decisiones-f0-v1), [métricas y calidad](docs/fase-0/METRICAS_Y_CALIDAD.md) y [linaje y privacidad](docs/fase-0/LINAJE_Y_PRIVACIDAD.md). Su evidencia es local y sintética; no acredita un despliegue Azure, Gold, Unity Catalog ni cumplimiento normativo.
