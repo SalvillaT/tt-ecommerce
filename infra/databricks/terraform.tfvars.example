@@ -1,0 +1,5 @@
+# databricks_host                       = "https://adb-<workspace-id>.<region>.azuredatabricks.net"
+# access_connector_id                   = "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Databricks/accessConnectors/<connector>"
+# storage_account_name                  = "<adls-gen2-account-name>"
+# unity_catalog_prerequisites_confirmed = false
+# enable_sql_warehouse                  = false

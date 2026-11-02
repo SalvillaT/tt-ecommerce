@@ -1,0 +1,3 @@
+# name_prefix          = "ttdemo01"
+# storage_account_name = "stttdemo01lakeweu" # optional; must be globally unique
+# tags = { environment = "demo", managed_by = "terraform", data_class = "synthetic-only" }

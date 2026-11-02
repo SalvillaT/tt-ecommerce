@@ -45,7 +45,7 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 
 **Objetivo:** preparar una base mínima, auditable y costeable para el lakehouse.
 
-**Estado: PENDIENTE.**
+**Estado: EN CURSO (solo código y validación offline; sin `terraform apply`).** [Arquitectura y decisiones](fase-1/ARQUITECTURA_Y_DECISIONES.md) · [gates previos al despliegue](fase-1/GATES_DESPLIEGUE.md). La fase no se cerrará hasta comprobar recursos, permisos y costes en un despliegue autorizado.
 
 **Dependencias:** Fase 0; acceso administrativo aprobado a Azure y Databricks.
 

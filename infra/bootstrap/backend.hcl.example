@@ -1,0 +1,7 @@
+# Copy outside the repository and replace placeholders. Authenticate with Entra
+# ID (Azure CLI, managed identity, or workload identity); do not use access keys.
+resource_group_name  = "<existing-resource-group>"
+storage_account_name = "<state-storage-account>"
+container_name       = "tfstate"
+key                  = "platform.tfstate"
+use_azuread_auth     = true

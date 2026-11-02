@@ -2,7 +2,7 @@
 
 Proyecto de portfolio para diseñar un e-commerce ficticio de material de tenis de mesa y su plataforma analítica gobernada en Azure. El objetivo no es operar una tienda real: es demostrar cómo transformar eventos de venta sintéticos en métricas fiables para negocio, manteniendo el acceso a datos personales bajo control.
 
-> **Estado actual:** Fase 0 cerrada: documentación, generador de datos sintéticos, fixture de ejemplo y pruebas locales. No se han desplegado recursos de Azure ni creado notebooks, Terraform o dashboards todavía.
+> **Estado actual:** Fase 0 cerrada; Fase 1 en preparación offline con Terraform y controles previos al despliegue. No se han desplegado recursos de Azure ni creado notebooks o dashboards todavía.
 
 ## Problema y narrativa comercial
 
@@ -138,4 +138,4 @@ No hay recursos desplegados aún; los comandos anteriores solo generan y verific
 
 ## Roadmap
 
-El plan por fases, dependencias, entregables y criterios verificables está en [docs/PLAN_DE_DESARROLLO.md](docs/PLAN_DE_DESARROLLO.md). La Fase 0 cerrada se divide en [contratos de datos y acta de decisiones v1](docs/fase-0/CONTRATOS.md#acta-de-decisiones-f0-v1), [métricas y calidad](docs/fase-0/METRICAS_Y_CALIDAD.md) y [linaje y privacidad](docs/fase-0/LINAJE_Y_PRIVACIDAD.md). Su evidencia es local y sintética; no acredita un despliegue Azure, Gold, Unity Catalog ni cumplimiento normativo.
+El plan por fases, dependencias, entregables y criterios verificables está en [docs/PLAN_DE_DESARROLLO.md](docs/PLAN_DE_DESARROLLO.md). La Fase 0 cerrada se divide en [contratos de datos y acta de decisiones v1](docs/fase-0/CONTRATOS.md#acta-de-decisiones-f0-v1), [métricas y calidad](docs/fase-0/METRICAS_Y_CALIDAD.md) y [linaje y privacidad](docs/fase-0/LINAJE_Y_PRIVACIDAD.md). La Fase 1 en curso se documenta en [arquitectura y decisiones](docs/fase-1/ARQUITECTURA_Y_DECISIONES.md) y [gates de despliegue](docs/fase-1/GATES_DESPLIEGUE.md). Ninguna evidencia local acredita despliegue Azure, Gold, Unity Catalog ni cumplimiento normativo.

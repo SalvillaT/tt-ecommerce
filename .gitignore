@@ -13,6 +13,8 @@
 *.tfstate.*
 *.tfvars
 *.tfvars.json
+backend.hcl
+*.tfbackend
 *.tfplan
 *.tfplan.json
 crash.log
