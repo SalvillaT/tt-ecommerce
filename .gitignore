@@ -1,0 +1,51 @@
+# Credenciales y configuración local
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.p12
+*.key
+
+# Terraform: conservar .terraform.lock.hcl en el repositorio
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.tfplan
+*.tfplan.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Databricks y datos generados localmente
+.databricks/
+.bundle/
+data/raw/
+data/bronze/
+data/silver/
+data/gold/
+data/checkpoints/
+checkpoints/
+
+# Python y notebooks
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# IDE y sistema operativo
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
