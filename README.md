@@ -21,8 +21,8 @@ La fuente operativa se simulará con archivos o eventos de pedidos, clientes y c
 - Datos **sintéticos** reproducibles: pedidos JSONL y archivos CSV de clientes y catálogo, con casos de duplicados, anulaciones, nulos y cambios de esquema controlados.
 - Lago en ADLS Gen2 y carga incremental a Delta Bronze mediante Databricks Auto Loader, con checkpoints y captura de registros no interpretados (`rescued data`).
 - Transformaciones PySpark a Silver: contrato de esquema, tipado, deduplicación idempotente, reglas de calidad, cuarentena y columnas de auditoría.
-- Unity Catalog para gobernanza: catálogos/esquemas, permisos mínimos y políticas de enmascaramiento dinámico de email y teléfono para grupos concretos.
-- Tablas Gold agregadas sin columnas PII previstas para consumo general, consultables desde SQL Warehouse y un informe Power BI inicial.
+- Unity Catalog para gobernanza: en Fase 1, con gates explícitos, el código prepara el catálogo sintético `tt_ecommerce_synthetic`, los esquemas vacíos `bronze`, `silver`, `quarantine` y `gold`, y grants mínimos para un único grupo escritor existente. No hay despliegue ni evidencia live; las políticas de enmascaramiento dinámico se implementarán y probarán en la Fase 4.
+- Tablas Gold agregadas sin columnas PII previstas para consumo general. El SQL Warehouse se creará en la Fase 5, únicamente tras su gate de coste, antes del informe Power BI inicial.
 - Terraform como infraestructura declarativa, con estado remoto protegido cuando se disponga del backend; el estado y las credenciales nunca se versionarán.
 
 ### Ampliaciones (fuera del MVP)
@@ -86,7 +86,7 @@ Los roles/grupos concretos se crearán o mapearán a identidades reales disponib
 | `silver-analysts-authorized` | Solo una vista o subconjunto Silver aprobado; email/teléfono enmascarados dinámicamente. Sin `SELECT` general sobre tablas Silver. |
 | `bi-executives` | Solo vistas/tablas Gold publicadas a través del SQL Warehouse/Power BI; sin Bronze, Silver ni cuarentena. |
 
-Unity Catalog combinará privilegios de catálogo, esquema, tabla y vistas desde la creación de cada capa. El enmascaramiento dinámico de email/teléfono diferencia al grupo autorizado para ver el original de `silver-analysts-authorized`, pero **no** concede acceso por sí mismo: primero se restringe la tabla o vista y después se concede el mínimo `SELECT` necesario. Las pruebas de acceso se ejecutarán con identidades reales representativas, no solo como administrador.
+Antes de cargar datos en Bronze/Silver, Unity Catalog deberá tener el metastore asignado y una ubicación administrada DEFAULT aprobada; los catálogos/esquemas base y los grants mínimos deberán verificarse con identidades reales. El catálogo no define `storage_root`: si no hay DEFAULT aprobada, se bloquea y se rediseña con el administrador UC. El IaC de Fase 1 solo declara para un grupo escritor `USE_CATALOG` y, por esquema, `USE_SCHEMA`/`CREATE_TABLE`; no declara grants para analistas, BI, stewardship o `account users`. Esto no prueba que sean los únicos accesos efectivos: grants heredados/preexistentes y propietarios pueden prevalecer. El enmascaramiento dinámico es trabajo de la Fase 4; no se declara configurado ni se cargarán PII reales.
 
 Gold evitará publicar PII por diseño. Eso no garantiza que un agregado de baja cardinalidad no permita inferencias; antes de exponerlo se definirán criterios de tamaño mínimo, supresión o generalización acordes al caso de uso.
 
@@ -108,9 +108,10 @@ Gold evitará publicar PII por diseño. Eso no garantiza que un agregado de baja
 
 ## Decisiones, prerrequisitos y coste
 
+- La región prevista para `platform` y para el backend opcional `bootstrap` es **France Central**. El asistente de Azure mostró una advertencia de no admisión de nuevos clientes en West Europe y no la mostró en France Central; es una señal observada por el usuario, no una garantía de cuota, Free Trial ni cobertura Premium. No hay recursos desplegados.
 - Unity Catalog requiere que el workspace, metastore, almacenamiento administrado/external locations, identidades y permisos se preparen de forma compatible con la configuración Azure/Databricks elegida. Esta secuencia se validará antes de automatizarla.
 - El estado remoto de Terraform debe usar un backend protegido con bloqueo y acceso mínimo. Para experimentación local del MVP podría emplearse estado local **sin versionarlo**, pero no es una opción de colaboración ni producción.
-- La topología final, SKU, horarios de apagado, retención y tamaño de cómputo se decidirán tras una estimación de volumen y presupuesto. Se priorizarán jobs efímeros, límites de coste y apagado del SQL Warehouse.
+- La topología final, SKU, horarios de apagado, retención y tamaño de cómputo se decidirán tras una estimación de volumen y presupuesto. El SQL Warehouse permanece como código opt-in desactivado y no se creará en Fase 1; su creación en Fase 5 exige una revisión de coste antes de Power BI.
 - Algunas operaciones de Databricks/Azure pueden requerir pasos administrativos o no estar disponibles en la versión del provider elegida; se comprobarán en el momento de despliegue en vez de asumir soporte total.
 
 ## Probar la fase 0 en local
@@ -128,14 +129,16 @@ En macOS/Linux se puede sustituir `py` por `python3`. El lote se guarda en `data
 
 Cuando se implemente la infraestructura, el repositorio documentará sus comandos y variables exactos. A alto nivel, la ejecución será:
 
-1. Configurar suscripción/tenant, identidades, backend de Terraform y permisos requeridos.
-2. Aplicar infraestructura revisada y configurar el metastore/Unity Catalog según los prerrequisitos validados.
+1. Confirmar France Central, suscripción/tenant, identidades, backend de Terraform y permisos requeridos; no crear recursos manualmente desde el portal.
+2. Tras autorización, aplicar la fundación y el root Databricks: verificar metastore/asignación e identidad aplicadora, ubicación administrada DEFAULT, credencial/ubicación externa, catálogo/esquemas vacíos y el grant mínimo del único grupo escritor.
 3. Generar datos sintéticos, subirlos al área de aterrizaje y ejecutar la ingesta Bronze.
 4. Ejecutar Silver, revisar cuarentena y métricas de calidad; solo entonces refrescar Gold.
-5. Probar permisos con cada identidad de prueba y conectar Power BI al SQL Warehouse autorizado.
+5. Completar en Fase 4 las pruebas de permisos y máscaras por identidad; en Fase 5, crear el SQL Warehouse solo tras el gate de coste y conectar Power BI.
 
-No hay recursos desplegados aún; los comandos anteriores solo generan y verifican datos locales.
+No hay recursos desplegados aún; los comandos anteriores solo generan y verifican datos locales. El 2026-11-03 se verificó offline únicamente `infra/databricks` con Terraform 1.13.5 (binario temporal con SHA256 oficial) y provider Databricks 1.80.0: `fmt -check -recursive`, `init -backend=false -lockfile=readonly` y `validate` finalizaron con código 0. No hubo credenciales, Azure, state ni plan; no acredita permisos, propietarios, acceso efectivo ni la configuración actual de `platform`/`bootstrap`.
 
 ## Roadmap
 
-El plan por fases, dependencias, entregables y criterios verificables está en [docs/PLAN_DE_DESARROLLO.md](docs/PLAN_DE_DESARROLLO.md). La Fase 0 cerrada se divide en [contratos de datos y acta de decisiones v1](docs/fase-0/CONTRATOS.md#acta-de-decisiones-f0-v1), [métricas y calidad](docs/fase-0/METRICAS_Y_CALIDAD.md) y [linaje y privacidad](docs/fase-0/LINAJE_Y_PRIVACIDAD.md). La Fase 1 en curso se documenta en [arquitectura y decisiones](docs/fase-1/ARQUITECTURA_Y_DECISIONES.md) y [gates de despliegue](docs/fase-1/GATES_DESPLIEGUE.md). Ninguna evidencia local acredita despliegue Azure, Gold, Unity Catalog ni cumplimiento normativo.
+El plan por fases, dependencias, entregables y criterios verificables está en [docs/PLAN_DE_DESARROLLO.md](docs/PLAN_DE_DESARROLLO.md). La Fase 0 cerrada cubre [contratos](docs/fase-0/CONTRATOS.md#acta-de-decisiones-f0-v1), [métricas y calidad](docs/fase-0/METRICAS_Y_CALIDAD.md) y [linaje y privacidad](docs/fase-0/LINAJE_Y_PRIVACIDAD.md). La Fase 1 sigue en curso: [arquitectura y decisiones](docs/fase-1/ARQUITECTURA_Y_DECISIONES.md), [gates](docs/fase-1/GATES_DESPLIEGUE.md), [guía de despliegue guiado](docs/fase-1/GUIA_DESPLIEGUE_GUIADO.md) y [ciclo de desarrollo](docs/fase-1/CICLO_DE_DESARROLLO.md). Las Fases 2–3 construirán Bronze/Silver, la Fase 4 aplicará máscaras y pruebas de acceso, y la Fase 5 habilitará SQL Warehouse/Power BI tras el gate de coste. Ninguna evidencia local acredita despliegue Azure, UC activo, Gold, SQL Warehouse ni cumplimiento normativo.
+
+Para controlar el gasto en futuras sesiones, se conservarán workspace y ADLS y se detendrá el cómputo; el procedimiento previsto está en [ciclo de desarrollo](docs/fase-1/CICLO_DE_DESARROLLO.md). No se ha desplegado ni encendido ningún recurso.

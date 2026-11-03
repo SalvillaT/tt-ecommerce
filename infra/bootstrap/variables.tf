@@ -4,9 +4,9 @@ variable "resource_group_name" {
 }
 
 variable "location" {
-  description = "Azure region for the optional state storage account."
+  description = "Azure region for the optional state storage account. The state root is independent of the platform root."
   type        = string
-  default     = "westeurope"
+  default     = "francecentral"
 }
 
 variable "storage_account_name" {

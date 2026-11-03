@@ -4,9 +4,46 @@ variable "databricks_host" {
 }
 
 variable "unity_catalog_prerequisites_confirmed" {
-  description = "Set true only after a UC administrator confirms a metastore is assigned and applying identity permissions are sufficient."
+  description = "Set true only after a UC administrator confirms an existing metastore is assigned and the applying identity has the required workspace/UC role and object-owner authority."
   type        = bool
   default     = false
+}
+
+variable "metastore_default_managed_storage_confirmed" {
+  description = "Set true only after the UC administrator confirms the assigned metastore has an approved DEFAULT managed-storage location. Catalog and schemas intentionally omit storage_root."
+  type        = bool
+  default     = false
+}
+
+variable "approved_engineer_writer_group_confirmed" {
+  description = "Set true only after the named pre-existing account group is approved for the minimal Phase 1 writer grants."
+  type        = bool
+  default     = false
+}
+
+variable "engineer_writer_group_name" {
+  description = "Required display name of one approved, pre-existing account group. Do not use 'account users' or wildcard names."
+  type        = string
+
+  validation {
+    condition = (
+      length(trimspace(var.engineer_writer_group_name)) > 0 &&
+      lower(trimspace(var.engineer_writer_group_name)) != "account users" &&
+      !strcontains(var.engineer_writer_group_name, "*")
+    )
+    error_message = "engineer_writer_group_name must be a specific non-empty pre-existing group, not 'account users' or a wildcard."
+  }
+}
+
+variable "catalog_name" {
+  description = "Unity Catalog catalog name for synthetic tt-ecommerce data. It uses the metastore DEFAULT managed-storage location."
+  type        = string
+  default     = "tt_ecommerce_synthetic"
+
+  validation {
+    condition     = can(regex("^[A-Za-z][A-Za-z0-9_]{0,127}$", var.catalog_name))
+    error_message = "catalog_name must start with a letter and contain only letters, digits, and underscores (maximum 128 characters)."
+  }
 }
 
 variable "access_connector_id" {
@@ -26,7 +63,13 @@ variable "external_location_name" {
 }
 
 variable "enable_sql_warehouse" {
-  description = "Explicit cost opt-in. Creates a small SQL Warehouse only when true."
+  description = "Phase 5-only explicit cost opt-in. Creates a PRO 2X-Small SQL Warehouse only when true and phase5_sql_warehouse_approved is true."
+  type        = bool
+  default     = false
+}
+
+variable "phase5_sql_warehouse_approved" {
+  description = "Set true only for Phase 5 after Gold is available and exact PRO 2X-Small pricing, permissions, quota, and cost approval are confirmed."
   type        = bool
   default     = false
 }

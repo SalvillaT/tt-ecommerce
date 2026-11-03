@@ -43,27 +43,29 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 
 ### Fase 1 — Fundaciones Azure, Terraform e identidad
 
-**Objetivo:** preparar una base mínima, auditable y costeable para el lakehouse.
+**Objetivo:** preparar y verificar, tras despliegue autorizado, la fundación Azure y el control base de Unity Catalog antes de que Bronze/Silver reciban datos.
 
-**Estado: EN CURSO (solo código y validación offline; sin `terraform apply`).** [Arquitectura y decisiones](fase-1/ARQUITECTURA_Y_DECISIONES.md) · [gates previos al despliegue](fase-1/GATES_DESPLIEGUE.md). La fase no se cerrará hasta comprobar recursos, permisos y costes en un despliegue autorizado.
+**Estado: EN CURSO (preparación offline lista; sin `terraform apply`).** Región prevista: **France Central** para `platform` y `bootstrap` opcional. [Arquitectura y decisiones](fase-1/ARQUITECTURA_Y_DECISIONES.md) · [gates previos al despliegue](fase-1/GATES_DESPLIEGUE.md) · [guía de despliegue guiado](fase-1/GUIA_DESPLIEGUE_GUIADO.md). El 2026-11-03, solo `infra/databricks` pasó `fmt -check -recursive`, `init -backend=false -lockfile=readonly` y `validate` (Terraform 1.13.5 temporal con SHA256 oficial; provider 1.80.0; código 0). No hubo credenciales, Azure, state ni plan; otros roots no forman parte de esta ejecución. La fase no se cerrará hasta comprobar recursos, permisos y costes en un despliegue autorizado.
 
-**Dependencias:** Fase 0; acceso administrativo aprobado a Azure y Databricks.
+**Ciclo operativo aprobado:** conservar workspace y ADLS; detener Jobs/SQL entre sesiones sin `terraform destroy` rutinario. Véase [ciclo de desarrollo](fase-1/CICLO_DE_DESARROLLO.md).
+
+**Dependencias:** Fase 0; acceso administrativo aprobado a Azure y Databricks; gates de coste, identidad, red y UC aprobados.
 
 **Tareas unitarias**
 
-1. Confirmar suscripción, región, convención de nombres, etiquetas, presupuesto/alertas y responsables de recursos.
+1. Confirmar France Central, suscripción, convención de nombres, etiquetas, presupuesto/alertas y responsables; reevaluar coste persistente de ADLS/workspace y elegibilidad/cuota/Premium en esa región. La advertencia observada en West Europe no garantiza disponibilidad en France Central.
 2. Diseñar módulos Terraform para resource group, ADLS Gen2, configuraciones de acceso necesarias, Databricks y dependencias soportadas por el provider elegido.
 3. Configurar backend remoto protegido para `tfstate`, con acceso mínimo y mecanismo de bloqueo si está disponible; para una prueba aislada, documentar estado local no versionado y su limitación.
-4. Crear o mapear grupos reales del tenant y registrar propietario/proceso de alta-baja: `data-engineers`, `customer-data-stewards`, `silver-analysts-authorized` y `bi-executives` (nombres provisionales). Definir la matriz: ingenieros/stewards con necesidad justificada ven contacto original; analistas autorizados solo un subconjunto Silver mediante vista con contacto enmascarado; BI/dirección solo Gold.
+4. Confirmar el nombre de un único grupo de escritores existente y aprobado para el control mínimo de Fase 1. No crear grupos ni conceder acceso a analistas, BI, stewardship o `account users`; la matriz ampliada, vistas y máscaras se implementan en Fase 4.
 5. Preparar identidades administradas/service principals y permisos mínimos para despliegue, jobs y acceso a almacenamiento, separando identidad humana y automatización.
 6. Decidir y configurar Key Vault o el gestor corporativo de secretos si el patrón necesita secretos; comprobar que no se imprimen en logs ni se incluyen en variables versionadas.
-7. Validar prerrequisitos de Unity Catalog: metastore, asociación de workspace, almacenamiento y patrón de external location/credential aplicable al entorno. Documentar cualquier paso manual administrativo.
-8. Crear los catálogos/esquemas y privilegios base mínimos para las rutas y objetos que se crearán en Bronze/Silver, sin conceder acceso general a Silver; completar y probar las políticas de masking en Fase 4.
-9. Crear SQL Warehouse con política de apagado y capacidad inicial conservadora, tras validar permisos y coste.
+7. Validar y, tras autorización, verificar un metastore Unity Catalog compatible con France Central, su asociación al workspace e identidad aplicadora con autoridad de objeto. Terraform no crea ni asigna el metastore. El root exige además una ubicación administrada DEFAULT aprobada: el catálogo no usa `storage_root`; si falta, bloquear y rediseñar con el administrador UC.
+8. Confirmar soporte/permisos del provider Databricks 1.80.0 y, tras la verificación UC autorizada, crear credencial/ubicación externa, el catálogo `tt_ecommerce_synthetic`, los esquemas vacíos `bronze`, `silver`, `quarantine` y `gold`, y grants base. El IaC declara para el único grupo escritor `USE_CATALOG`, `USE_SCHEMA` y `CREATE_TABLE`, sin declarar `SELECT`/`MODIFY` ni grants para otros grupos; inventariar accesos heredados/propietarios antes de inferir acceso efectivo. Todo debe existir antes de cargar datos.
+9. Mantener el SQL Warehouse como configuración/código opt-in desactivado en Fase 1: no crearlo ni habilitarlo. Su creación, auto-stop y gate de coste se trasladan explícitamente a Fase 5, cuando exista Gold y se confirme precio/uso de Power BI.
 
-**Entregables:** diseño de módulos Terraform, guía de despliegue/rollback, inventario de identidades y grupos, decisión de backend y lista de prerrequisitos UC.
+**Entregables:** diseño de módulos Terraform, guía de despliegue/rollback, nombre no versionado del único grupo escritor aprobado, decisión de backend, evidencia autorizada de la fundación/UC base o registro explícito de bloqueos, y lista de soporte/permisos necesarios para UC.
 
-**Aceptación verificable:** `terraform plan` se revisa sin secretos; no hay `tfstate` ni credenciales en el repositorio; identidades de job y personas tienen permisos diferenciados; los privilegios base restringen Bronze/Silver/cuarentena desde su creación; se puede demostrar que `bi-executives` no obtiene acceso directo al almacenamiento o Silver; los pasos UC pendientes quedan explícitos.
+**Aceptación verificable:** además de la validación offline registrada, un despliegue autorizado demuestra la fundación Azure, metastore asignado, identidad aplicadora y ubicación administrada DEFAULT. Si esa ubicación falta, Fase 1 queda bloqueada para rediseño UC. Antes de recibir datos existen credencial/ubicación externa, `tt_ecommerce_synthetic`, sus cuatro esquemas vacíos y los grants **explícitos de IaC** del único grupo escritor (`USE_CATALOG`, `USE_SCHEMA`, `CREATE_TABLE`). Antes y después del apply se inventarían grants y propietarios preexistentes/efectivos: el IaC no revoca herencias, y el propietario/creador puede tener poderes adicionales, incluidos lectura/modificación de sus tablas. Se comprueba acceso efectivo y propietarios con identidades permitidas/no autorizadas, incluidas negativas de lectura/escritura para BI, stewardship y analistas, sin cargar datos en Fase 1. No se exige ni se declara máscara, PII real ni SQL Warehouse.
 
 ---
 
@@ -71,7 +73,7 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 
 **Objetivo:** cargar origen sintético sin mutarlo y poder reanudar la ingestión sin duplicar resultados lógicos.
 
-**Dependencias:** Fases 0–1; ADLS, workspace y ubicación gobernada configurados.
+**Dependencias:** Fases 0–1; ADLS y workspace desplegados autorizadamente; metastore UC asignado, ubicación administrada DEFAULT aprobada, credencial/ubicación externa, `tt_ecommerce_synthetic`, sus esquemas/grant base y los permisos de ingesta verificados antes de cargar Bronze.
 
 **Tareas unitarias**
 
@@ -118,10 +120,10 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 
 **Tareas unitarias**
 
-1. Validar y completar la propiedad, catálogos y esquemas creados como control base en Fase 1 para Bronze, Silver, cuarentena y Gold.
+1. Validar y completar propiedad, catálogos y esquemas de Fase 1 para Bronze, Silver, cuarentena y Gold; cualquier objeto Gold adicional se prepara al existir sus tablas.
 2. Completar los privilegios mínimos sobre los controles base de Fase 1: ingeniería para operación, stewardship con caso justificado para contacto original, `silver-analysts-authorized` solo sobre una vista/subconjunto Silver aprobado y `bi-executives` solo sobre Gold publicado.
 3. Mantener Silver restringido; no conceder `SELECT` general a analistas. Publicar una vista específica para el subconjunto permitido y reservar las tablas base a los grupos operativos/autorizados.
-4. Configurar política de enmascaramiento dinámico para email/teléfono con pertenencia a grupos reales: ingenieros/stewards autorizados ven el original; analistas autorizados reciben valor enmascarado. Mantener una ruta segura de mantenimiento de grupo.
+4. Configurar y probar la política de enmascaramiento dinámico para email/teléfono sintéticos con pertenencia a grupos reales: ingenieros/stewards autorizados ven el original; analistas autorizados reciben valor enmascarado. No se carga ni trata PII real en esta fase; mantener una ruta segura de mantenimiento de grupo.
 5. Verificar con identidades reales de prueba separadas: positivo para ingeniero/steward autorizado (original), positivo para analista autorizado (vista y máscara), positivo para BI/dirección (Gold), y negativo para cada acceso no permitido a Bronze/Silver/cuarentena. Verificar además que la política de máscara no otorga `SELECT` a una identidad sin privilegio.
 6. Revisar logs/auditoría disponibles y documentar cómo investigar un acceso o un cambio de privilegios.
 
@@ -135,7 +137,7 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 
 **Objetivo:** entregar métricas estables, útiles y con exposición controlada.
 
-**Dependencias:** Fases 3–4 y validación de métricas por negocio.
+**Dependencias:** Fases 3–4, validación de métricas por negocio y gate de coste/permisos del SQL Warehouse aprobado tras existir Gold.
 
 **Tareas unitarias**
 
@@ -143,13 +145,13 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 2. Refrescar una ventana de fechas explícita contra una instantánea completa de Silver; usar sobrescritura selectiva con restricción de predicado activa para que una fecha sin ventas elimine resultados antiguos sin tocar otras fechas.
 3. Asociar a cada fila Gold un resultado/puntuación de calidad y timestamp de refresco; definir el tratamiento para datos incompletos.
 4. Aplicar los criterios acordados de umbral, supresión o generalización y registrar las celdas no publicadas. Revisar que no se promete ausencia absoluta de riesgo de inferencia.
-5. Crear vistas Gold de consumo y permisos para BI; validar consultas desde SQL Warehouse con límites y apagado configurados.
-6. Construir un informe Power BI inicial con modo Import. Evaluar DirectQuery solo si los requisitos de frescura lo justifican y tras medir comportamiento/coste del SQL Warehouse.
+5. Crear vistas Gold de consumo y permisos para BI. Solo entonces revisar precio, cuota, permisos y patrón de uso del SQL Warehouse; crear el Warehouse opt-in con capacidad conservadora y auto-stop, y validar consultas.
+6. Construir un informe Power BI inicial con modo Import después de validar el Warehouse. Evaluar DirectQuery solo si los requisitos de frescura lo justifican y tras medir comportamiento/coste.
 7. Comparar resultados con un conjunto de control conocido: ventas completadas, reembolsos y días sin ventas.
 
 **Entregables:** tablas/vistas Gold, definición de métricas, evidencia de refresco de ventana, consulta de validación e informe Power BI MVP.
 
-**Aceptación verificable:** un reembolso o cancelación elimina/recalcula correctamente la métrica en la ventana afectada; una fecha vacía no conserva una fila de ingresos antigua; fechas fuera de la ventana no cambian; BI solo consulta los objetos Gold autorizados; el informe coincide con el conjunto de control.
+**Aceptación verificable:** un reembolso o cancelación elimina/recalcula correctamente la métrica en la ventana afectada; una fecha vacía no conserva una fila de ingresos antigua; fechas fuera de la ventana no cambian; antes de Power BI se evidencia el gate de coste y el Warehouse creado tiene auto-stop; BI solo consulta los objetos Gold autorizados; el informe coincide con el conjunto de control.
 
 ---
 

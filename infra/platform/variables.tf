@@ -9,19 +9,19 @@ variable "name_prefix" {
 }
 
 variable "location" {
-  description = "Azure region for the synthetic-demo platform."
+  description = "Azure region for the synthetic-demo platform. Derived default names use frc for France Central and a normalized three-character suffix for another location."
   type        = string
-  default     = "westeurope"
+  default     = "francecentral"
 }
 
 variable "resource_group_name" {
-  description = "Resource group name for the platform."
+  description = "Optional resource group name for the platform; otherwise derived from name_prefix and location."
   type        = string
   default     = null
 }
 
 variable "storage_account_name" {
-  description = "Optional globally unique storage account name; otherwise derived from name_prefix."
+  description = "Optional globally unique storage account name; otherwise derived from name_prefix and location."
   type        = string
   default     = null
 }

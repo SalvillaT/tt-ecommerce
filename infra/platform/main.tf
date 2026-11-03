@@ -1,7 +1,11 @@
 locals {
-  resource_group_name  = coalesce(var.resource_group_name, "rg-${var.name_prefix}-lakehouse-weu")
-  storage_account_name = coalesce(var.storage_account_name, "st${var.name_prefix}lakeweu")
-  databricks_name      = "dbw-${var.name_prefix}-lakehouse-weu"
+  location_slug = lower(replace(replace(var.location, " ", ""), "-", ""))
+  region_suffix = lookup({ francecentral = "frc" }, local.location_slug, substr(local.location_slug, 0, 3))
+
+  resource_group_name    = coalesce(var.resource_group_name, "rg-${var.name_prefix}-lakehouse-${local.region_suffix}")
+  storage_account_name   = coalesce(var.storage_account_name, "st${var.name_prefix}lake${local.region_suffix}")
+  databricks_name        = "dbw-${var.name_prefix}-lakehouse-${local.region_suffix}"
+  access_connector_name  = "dbac-${var.name_prefix}-lakehouse-${local.region_suffix}"
 }
 
 resource "azurerm_resource_group" "platform" {
@@ -63,7 +67,7 @@ resource "azurerm_databricks_workspace" "lakehouse" {
 }
 
 resource "azurerm_databricks_access_connector" "lakehouse" {
-  name                = "dbac-${var.name_prefix}-lakehouse-weu"
+  name                = local.access_connector_name
   resource_group_name = azurerm_resource_group.platform.name
   location            = azurerm_resource_group.platform.location
 
