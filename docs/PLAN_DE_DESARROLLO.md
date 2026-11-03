@@ -45,17 +45,17 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 
 **Objetivo:** preparar y verificar, tras despliegue autorizado, la fundación Azure y el control base de Unity Catalog antes de que Bronze/Silver reciban datos.
 
-**Estado: EN CURSO (preparación offline lista; sin `terraform apply`).** Región prevista: **France Central** para `platform` y `bootstrap` opcional. [Arquitectura y decisiones](fase-1/ARQUITECTURA_Y_DECISIONES.md) · [gates previos al despliegue](fase-1/GATES_DESPLIEGUE.md) · [guía de despliegue guiado](fase-1/GUIA_DESPLIEGUE_GUIADO.md). El 2026-11-03, solo `infra/databricks` pasó `fmt -check -recursive`, `init -backend=false -lockfile=readonly` y `validate` (Terraform 1.13.5 temporal con SHA256 oficial; provider 1.80.0; código 0). No hubo credenciales, Azure, state ni plan; otros roots no forman parte de esta ejecución. La fase no se cerrará hasta comprobar recursos, permisos y costes en un despliegue autorizado.
+**Estado: EN CURSO (Stage 1 y Stage 2 de platform aplicados según reporte; sin apply del root `databricks`).** Región prevista: **France Central** para `platform` y `bootstrap` opcional. G5 de red está registrado: endpoints públicos sin allowlist para principals autenticados y datos sintéticos; no es red privada ni evidencia cloud directa. [Arquitectura y decisiones](fase-1/ARQUITECTURA_Y_DECISIONES.md) · [gates previos al despliegue](fase-1/GATES_DESPLIEGUE.md) · [guía de despliegue guiado](fase-1/GUIA_DESPLIEGUE_GUIADO.md). El usuario reporta backend remoto funcional, fundación/RBAC/workspace/connector/contenedores y Stage 2 autorizado con exactamente siete rutas Gen2 creadas, sin cambios ni destrucciones. Los dos flags Stage 2 permanecen `true` y no deben volver a `false`. UC/metastore/catálogo/esquemas/grants, datos, jobs y SQL permanecen sin desplegar. La fase no se cerrará hasta los gates UC y la actualización de coste/uso.
 
 **Ciclo operativo aprobado:** conservar workspace y ADLS; detener Jobs/SQL entre sesiones sin `terraform destroy` rutinario. Véase [ciclo de desarrollo](fase-1/CICLO_DE_DESARROLLO.md).
 
-**Dependencias:** Fase 0; acceso administrativo aprobado a Azure y Databricks; gates de coste, identidad, red y UC aprobados.
+**Dependencias:** Fase 0; acceso administrativo aprobado a Azure y Databricks; G5 de red registrado y gates de coste, identidad, backend y UC pendientes/aprobados según evidencia.
 
 **Tareas unitarias**
 
 1. Confirmar France Central, suscripción, convención de nombres, etiquetas, presupuesto/alertas y responsables; reevaluar coste persistente de ADLS/workspace y elegibilidad/cuota/Premium en esa región. La advertencia observada en West Europe no garantiza disponibilidad en France Central.
-2. Diseñar módulos Terraform para resource group, ADLS Gen2, configuraciones de acceso necesarias, Databricks y dependencias soportadas por el provider elegido.
-3. Configurar backend remoto protegido para `tfstate`, con acceso mínimo y mecanismo de bloqueo si está disponible; para una prueba aislada, documentar estado local no versionado y su limitación.
+2. Diseñar módulos Terraform para resource group, ADLS Gen2, configuraciones de acceso necesarias, Databricks y dependencias soportadas por el provider elegido. El operador Azure CLI actual recibe por IaC Blob Data Contributor solo en `landing`/`lakehouse` para rutas; el Access Connector mantiene su RBAC independiente solo en `lakehouse`. Rutas en segunda etapa gated.
+3. Configurar backend remoto protegido para `tfstate`: Storage Account separado, contenedor privado, endpoint público sin allowlist solo para Entra/RBAC autenticado, Shared Key/usuarios locales deshabilitados, OAuth por defecto y versionado/soft delete de 7 días. Los recursos y el role assignment de contenedor están reportados como aplicados, bootstrap conserva estado local y el usuario reporta backend remoto configurado para `platform`. Owner de suscripción no concede por sí solo acceso Entra al plano de datos Blob; un cambio posterior a SP/managed identity cambia el principal y exige revisar el plan.
 4. Confirmar el nombre de un único grupo de escritores existente y aprobado para el control mínimo de Fase 1. No crear grupos ni conceder acceso a analistas, BI, stewardship o `account users`; la matriz ampliada, vistas y máscaras se implementan en Fase 4.
 5. Preparar identidades administradas/service principals y permisos mínimos para despliegue, jobs y acceso a almacenamiento, separando identidad humana y automatización.
 6. Decidir y configurar Key Vault o el gestor corporativo de secretos si el patrón necesita secretos; comprobar que no se imprimen en logs ni se incluyen en variables versionadas.
@@ -63,7 +63,7 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 8. Confirmar soporte/permisos del provider Databricks 1.80.0 y, tras la verificación UC autorizada, crear credencial/ubicación externa, el catálogo `tt_ecommerce_synthetic`, los esquemas vacíos `bronze`, `silver`, `quarantine` y `gold`, y grants base. El IaC declara para el único grupo escritor `USE_CATALOG`, `USE_SCHEMA` y `CREATE_TABLE`, sin declarar `SELECT`/`MODIFY` ni grants para otros grupos; inventariar accesos heredados/propietarios antes de inferir acceso efectivo. Todo debe existir antes de cargar datos.
 9. Mantener el SQL Warehouse como configuración/código opt-in desactivado en Fase 1: no crearlo ni habilitarlo. Su creación, auto-stop y gate de coste se trasladan explícitamente a Fase 5, cuando exista Gold y se confirme precio/uso de Power BI.
 
-**Entregables:** diseño de módulos Terraform, guía de despliegue/rollback, nombre no versionado del único grupo escritor aprobado, decisión de backend, evidencia autorizada de la fundación/UC base o registro explícito de bloqueos, y lista de soporte/permisos necesarios para UC.
+**Entregables:** diseño de módulos Terraform, guía de despliegue/rollback, nombre no versionado del único grupo escritor aprobado, decisión y runbook de backend, evidencia autorizada de la fundación/UC base o registro explícito de bloqueos, y lista de soporte/permisos necesarios para UC.
 
 **Aceptación verificable:** además de la validación offline registrada, un despliegue autorizado demuestra la fundación Azure, metastore asignado, identidad aplicadora y ubicación administrada DEFAULT. Si esa ubicación falta, Fase 1 queda bloqueada para rediseño UC. Antes de recibir datos existen credencial/ubicación externa, `tt_ecommerce_synthetic`, sus cuatro esquemas vacíos y los grants **explícitos de IaC** del único grupo escritor (`USE_CATALOG`, `USE_SCHEMA`, `CREATE_TABLE`). Antes y después del apply se inventarían grants y propietarios preexistentes/efectivos: el IaC no revoca herencias, y el propietario/creador puede tener poderes adicionales, incluidos lectura/modificación de sus tablas. Se comprueba acceso efectivo y propietarios con identidades permitidas/no autorizadas, incluidas negativas de lectura/escritura para BI, stewardship y analistas, sin cargar datos en Fase 1. No se exige ni se declara máscara, PII real ni SQL Warehouse.
 
@@ -187,8 +187,8 @@ Este plan convierte el diseño del README en un MVP reproducible, sin dar por ex
 
 ## Hitos de decisión abiertos
 
-1. Confirmar tenant, región **cloud** (distinta de la zona comercial `Europe/Madrid` ya acordada), presupuesto, capacidad administrativa y patrón de red permitido.
-2. Elegir el backend remoto y el mecanismo de bloqueo de Terraform conforme a estándares del entorno.
+1. Confirmar tenant, France Central, presupuesto/capacidad administrativa y evidencia de las decisiones G5 y coste todavía pendientes.
+2. Ejecutar y evidenciar, solo tras autorización, el backend remoto decidido: bootstrap, RBAC Blob de contenedor, propagación y migración de estado; no se reabre la decisión sin un motivo de seguridad/coste.
 3. Validar la configuración concreta de Unity Catalog y qué partes puede automatizar la versión de provider disponible.
 4. Definir volumen objetivo y dimensionamiento de infraestructura; el SLA objetivo, ingresos, ventana de reproceso y umbral Gold ya se acordaron en Fase 0, pero no se han medido ni implementado.
 5. Decidir si Power BI necesita DirectQuery; el punto de partida es Import por simplicidad y control de coste.

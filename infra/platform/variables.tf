@@ -35,3 +35,15 @@ variable "tags" {
     data_class  = "synthetic-only"
   }
 }
+
+variable "create_data_lake_directories" {
+  description = "Two-stage bootstrap: when false (initial value), no Gen2 directories are created and only the operator role assignments are applied. Set true only in the second stage. WARNING: must never be set back to false after the directories have been created — flipping it to false removes all directory instances from the plan and would destroy the 7 Gen2 directories and any data under them."
+  type        = bool
+  default     = false
+}
+
+variable "terraform_operator_blob_access_confirmed" {
+  description = "Confirmation switch for the second stage: leave false in the first stage; set true only AFTER the first-stage Terraform operator role assignments have been applied and Entra-authenticated Storage Blob Data Contributor access has been verified against BOTH the landing and lakehouse containers. Gates azurerm_storage_data_lake_gen2_path directory creation."
+  type        = bool
+  default     = false
+}

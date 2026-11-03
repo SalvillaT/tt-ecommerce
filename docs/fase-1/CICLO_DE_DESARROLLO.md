@@ -1,10 +1,12 @@
 # Fase 1 — Ciclo de desarrollo y control de coste
 
-**Estado:** decisión de diseño offline. No hay recursos desplegados, cómputo activo ni protecciones verificadas. Este runbook preventivo no autoriza credenciales, comandos de proveedor, `plan`, `apply` ni `destroy`: antes deben aprobarse los [gates](GATES_DESPLIEGUE.md).
+**Estado:** Fase 1 abierta. El usuario reporta bootstrap, backend remoto de platform, Stage 1 y Stage 2 aplicados, incluidas siete rutas Gen2. No hay datos, jobs, SQL ni UC aplicados; el reporte no acredita CI ni controles live adicionales. Este runbook preventivo no autoriza nuevos comandos, `plan`, `apply` ni `destroy`: antes deben aprobarse los [gates](GATES_DESPLIEGUE.md).
+
+La decisión G5 registrada permite endpoints públicos de Storage/workspace sin allowlist, solo para principals autenticados y datos sintéticos; no equivale a red privada ni acredita controles live. PII/datos reales están fuera de alcance; Private Link/VNet queda diferido.
 
 ## Decisión aceptada
 
-Se conservarán entre sesiones el root `platform`, el workspace y ADLS. No se usará `terraform destroy` para detener cómputo ni `-target` como mecanismo operativo. El root `platform` también posee RG, ADLS/contenedores/rutas, Access Connector y RBAC; destruirlo puede eliminar datos y dependencias, no solo el workspace. El backend `bootstrap` es separado y su state no debe borrarse en un cierre de sesión.
+Se conservarán entre sesiones el root `platform`, el workspace y ADLS. No se usará `terraform destroy` para detener cómputo ni `-target` como mecanismo operativo. El root `platform` también posee RG, ADLS/contenedores/rutas, Access Connector y RBAC; destruirlo puede eliminar datos y dependencias, no solo el workspace. Las siete rutas ADLS Stage 2 ya están reportadas como creadas. Los flags `create_data_lake_directories` y `terraform_operator_blob_access_confirmed` deben permanecer `true`: devolverlos a `false` destruiría las rutas. El backend `bootstrap` es separado; su `tfstate` sensible se conserva, no se borra en un cierre de sesión y se recupera mediante su versionado/soft delete aprobados.
 
 Si se hubiera aplicado `databricks` tras sus gates, incluiría credencial/ubicación externa, el catálogo sintético y esquemas vacíos/grant escritor; sus propietarios y accesos efectivos, incluidos grants heredados, requieren revisión separada antes de cualquier retirada. El SQL Warehouse permanece opt-in desactivado en Fase 1 y se crea, si procede, en Fase 5 tras Gold y su gate de coste. No se cargará PII ni datos reales.
 
