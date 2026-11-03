@@ -11,7 +11,7 @@ No root creates its own state backend. Do not commit
 | `platform` | Resource group, ADLS Gen2 storage, lake paths, Databricks Premium workspace, and connector identity | Base deployment |
 | `databricks` | Phase 1 workspace-level UC credential/external location, synthetic catalog, Bronze/Silver/quarantine/Gold schemas, and minimal writer grants; optional Phase 5 SQL Warehouse | Explicitly gated; SQL is off by default |
 
-The planned region for `platform` and optional `bootstrap` is **France Central**. A user-observed West Europe portal warning is not evidence that France Central supports this subscription, Free Trial quota, or Databricks Premium. The user reports that Stage 1 and separately authorized Stage 2 of `platform` are applied, with seven ADLS Gen2 paths created. This does not demonstrate CI or UC access. Databricks UC is not deployed. This repository holds no direct cloud evidence. For the approved future-session lifecycle (keep `platform`; stop active compute rather than destroy infrastructure), see [Fase 1 development cycle](../docs/fase-1/CICLO_DE_DESARROLLO.md). Phase 1 gates still govern any provider operation.
+The planned region for `platform` and optional `bootstrap` is **France Central**. A user-observed West Europe portal warning is not evidence that France Central supports this subscription, Free Trial quota, or Databricks Premium. The user reports Stages 1–3 of `platform` applied: seven paths plus private managed-storage infrastructure with its dedicated connector and container-scoped grant. Approved UC design leaves the existing metastore DEFAULT root empty: the synthetic catalog will use a child managed-storage path under the dedicated storage, while `lakehouse` remains isolated for external location. No plan may mutate or replace the metastore. The user also reports the cloud-only identity is Account Admin, Workspace Admin and sole Metastore Admin after an authorized transfer; it has no reported Azure subscription roles. Retain temporary Global Administrator until cloud/provider authentication and administrative recovery are verified. Databricks UC is not deployed. This repository holds no direct cloud evidence. For the approved future-session lifecycle (keep `platform`; stop active compute rather than destroy infrastructure), see [Fase 1 development cycle](../docs/fase-1/CICLO_DE_DESARROLLO.md). Phase 1 gates still govern any provider operation.
 
 ## Safe deployment order
 
@@ -61,7 +61,19 @@ The planned region for `platform` and optional `bootstrap` is **France Central**
    an approved **DEFAULT** managed-storage location. Set
    `unity_catalog_prerequisites_confirmed = true` and
    `metastore_default_managed_storage_confirmed = true` only then. This root
-   does not create or assign an account-level metastore.
+   does not create or assign an account-level metastore. The user reports its
+   DEFAULT root is intentionally left empty, while Stage 3 provides dedicated
+   private managed storage, connector, and container-scoped grant. Add the
+   approved identity to the workspace and verify workspace/metastore authority.
+   Then configure the approved parent external location and catalog child path
+   with identity/credential; never mutate or replace the metastore. `lakehouse`
+   remains reserved for the intended external location.
+   The user reports the cloud-only identity is now the account/workspace/sole
+   metastore administrator, but its Terraform authentication must still be
+   verified. Create/approve a least-privilege real writer group and confirm
+   effective membership before setting gates, validating, reviewing a plan, and
+   separately authorizing an apply. Retain temporary Global Administrator until
+   cloud/provider access, effective grants, and recovery criteria are verified.
 5. Before the Phase 1 catalog/grants can be created, provide the required,
    non-versioned name of one approved existing account group and set
    `approved_engineer_writer_group_confirmed = true`. No group is created.

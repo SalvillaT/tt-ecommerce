@@ -1,6 +1,6 @@
 # Fase 1 — Ciclo de desarrollo y control de coste
 
-**Estado:** Fase 1 abierta. El usuario reporta bootstrap, backend remoto de platform, Stage 1 y Stage 2 aplicados, incluidas siete rutas Gen2. No hay datos, jobs, SQL ni UC aplicados; el reporte no acredita CI ni controles live adicionales. Este runbook preventivo no autoriza nuevos comandos, `plan`, `apply` ni `destroy`: antes deben aprobarse los [gates](GATES_DESPLIEGUE.md).
+**Estado:** Fase 1 abierta. El usuario reporta bootstrap, backend remoto de platform y Stage 1–3 aplicados, incluidas siete rutas Gen2 y storage/conector dedicados para managed storage. El metastore está asignado y su root DEFAULT permanecerá vacío; el managed storage UC será de catálogo en child path exclusivo. También reporta identidad cloud-only como Account/Workspace/único Metastore Admin, con Global Administrator temporal retenido hasta verificación cloud/provider y recuperación. No hay UC, datos, jobs ni SQL aplicados. Este runbook preventivo no autoriza nuevos comandos, `plan`, `apply` ni `destroy`: antes deben aprobarse los [gates](GATES_DESPLIEGUE.md).
 
 La decisión G5 registrada permite endpoints públicos de Storage/workspace sin allowlist, solo para principals autenticados y datos sintéticos; no equivale a red privada ni acredita controles live. PII/datos reales están fuera de alcance; Private Link/VNet queda diferido.
 

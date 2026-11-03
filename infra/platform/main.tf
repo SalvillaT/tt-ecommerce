@@ -7,6 +7,18 @@ locals {
   databricks_name       = "dbw-${var.name_prefix}-lakehouse-${local.region_suffix}"
   access_connector_name = "dbac-${var.name_prefix}-lakehouse-${local.region_suffix}"
 
+  # Stage 3: dedicated Unity Catalog managed-storage foundation on the same
+  # HNS account; naming follows the existing prefix/region style (suffix -ucm-
+  # distinguishes it; max length dbac- + 12 + -ucm- + 3 stays under 30 chars).
+  uc_managed_container_name = "uc-managed"
+  uc_access_connector_name  = "dbac-${var.name_prefix}-ucm-${local.region_suffix}"
+
+  # Least privilege: the Terraform operator is granted Blob Data Contributor
+  # ONLY on landing/lakehouse. This explicit set (rather than the container
+  # collection) must never expand to uc-managed or the storage account scope;
+  # it also keeps operator state addresses ["landing"]/["lakehouse"] stable.
+  operator_blob_container_names = toset(["landing", "lakehouse"])
+
   # Exact directory map for the two-stage HNS lakehouse bootstrap; keys are
   # stable so enabling directory creation preserves existing addresses.
   data_lake_directories = {
@@ -56,8 +68,8 @@ resource "azurerm_storage_container" "lake" {
 }
 
 resource "azurerm_role_assignment" "operator_storage_blob_data_contributor" {
-  for_each             = azurerm_storage_container.lake
-  scope                = each.value.id
+  for_each             = local.operator_blob_container_names
+  scope                = azurerm_storage_container.lake[each.value].id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = data.azurerm_client_config.current.object_id
 }
@@ -111,4 +123,28 @@ resource "azurerm_role_assignment" "connector_storage_blob_data_contributor" {
   scope                = azurerm_storage_container.lake["lakehouse"].id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_databricks_access_connector.lakehouse.identity[0].principal_id
+}
+
+resource "azurerm_storage_container" "uc_managed" {
+  name                  = local.uc_managed_container_name
+  storage_account_id    = azurerm_storage_account.lake.id
+  container_access_type = "private"
+}
+
+resource "azurerm_databricks_access_connector" "uc_managed" {
+  name                = local.uc_access_connector_name
+  resource_group_name = azurerm_resource_group.platform.name
+  location            = azurerm_resource_group.platform.location
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  tags = var.tags
+}
+
+resource "azurerm_role_assignment" "uc_managed_connector_storage_blob_data_contributor" {
+  scope                = azurerm_storage_container.uc_managed.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_databricks_access_connector.uc_managed.identity[0].principal_id
 }

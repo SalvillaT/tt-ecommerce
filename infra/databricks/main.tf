@@ -1,19 +1,19 @@
 resource "terraform_data" "unity_catalog_gate" {
   input = {
     metastore_and_identity_confirmed = var.unity_catalog_prerequisites_confirmed
-    managed_storage_confirmed        = var.metastore_default_managed_storage_confirmed
+    catalog_managed_storage_confirmed  = var.catalog_managed_storage_confirmed
     writer_group_confirmed           = var.approved_engineer_writer_group_confirmed
   }
 
   lifecycle {
     precondition {
       condition     = var.unity_catalog_prerequisites_confirmed
-      error_message = "Confirm an existing UC metastore assignment and applying identity permissions before this root can create workspace-level UC objects."
+      error_message = "Confirm UC prerequisites: an existing metastore is assigned to this workspace in the France Central region; the cloud operator applying Terraform holds both Workspace Admin and Metastore Admin roles; the dedicated Stage 3 Access Connector holds Storage Blob Data Contributor on the uc-managed container. Existing metastore assignment and identity permissions stay unchanged."
     }
 
     precondition {
-      condition     = var.metastore_default_managed_storage_confirmed
-      error_message = "Confirm that the assigned metastore has an approved DEFAULT managed-storage location before creating this catalog without storage_root. Do not use the lakehouse external location as managed storage."
+      condition     = var.catalog_managed_storage_confirmed
+      error_message = "Confirm the catalog-level managed-storage model: the parent uc-managed container external location is approved and the catalog managed root is the exclusive subpath catalogs/<catalog_name> under it. Do not use the metastore DEFAULT managed-storage location or the lakehouse external location as catalog managed storage."
     }
 
     precondition {
@@ -44,14 +44,42 @@ resource "databricks_external_location" "lakehouse" {
 }
 
 resource "databricks_catalog" "synthetic" {
-  name    = var.catalog_name
-  comment = "Terraform-managed catalog for the synthetic tt-ecommerce project."
+  name         = var.catalog_name
+  comment      = "Terraform-managed catalog for the synthetic tt-ecommerce project."
+  # Catalog-level managed storage: exclusive subpath inside the isolated
+  # uc-managed container; never the metastore root or lakehouse location.
+  storage_root = local.catalog_managed_storage_root
 
-  # No storage_root: managed tables use the approved DEFAULT location of the metastore.
+  depends_on = [terraform_data.unity_catalog_gate, databricks_external_location.uc_managed]
+}
+
+resource "databricks_storage_credential" "uc_managed" {
+  name    = "tt-uc-managed-credential"
+  comment = "Dedicated Access Connector credential for Unity Catalog catalog-level managed storage in the isolated uc-managed container."
+
+  azure_managed_identity {
+    access_connector_id = var.uc_managed_access_connector_id
+  }
+
+  depends_on = [terraform_data.unity_catalog_gate]
+}
+
+resource "databricks_external_location" "uc_managed" {
+  name            = "tt_uc_managed"
+  url             = local.uc_managed_container_url
+  credential_name = databricks_storage_credential.uc_managed.id
+  comment         = "Isolated uc-managed container backing the synthetic catalog managed storage root."
+
   depends_on = [terraform_data.unity_catalog_gate]
 }
 
 locals {
+  # UC-managed foundation against the Stage 3 dedicated Access Connector:
+  # credential + external location cover ONLY the isolated uc-managed
+  # container; the catalog managed root is an exclusive subpath beneath it.
+  uc_managed_container_url     = "abfss://uc-managed@${var.storage_account_name}.dfs.core.windows.net/"
+  catalog_managed_storage_root = "${local.uc_managed_container_url}catalogs/${var.catalog_name}"
+
   phase1_schema_comments = {
     bronze     = "Raw synthetic data layer."
     silver     = "Refined synthetic data layer."

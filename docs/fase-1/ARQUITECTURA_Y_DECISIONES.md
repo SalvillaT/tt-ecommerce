@@ -1,6 +1,8 @@
 # Fase 1 — Arquitectura objetivo y decisiones
 
-**Estado:** Fase 1 abierta. El usuario reporta dos applies bootstrap, backend remoto funcional y Stage 1/Stage 2 autorizados de `platform`, con siete rutas Gen2 creadas sin cambios ni destrucciones. Bootstrap conserva estado local. No hay evidencia cloud directa en este repositorio; UC, datos, jobs y SQL no están desplegados. Esta guía no autoriza nuevos comandos. Se alinea con el root [infra/databricks](../../infra/README.md).
+**Estado:** Fase 1 abierta. El usuario reporta dos applies bootstrap, backend remoto funcional y Stage 1–3 autorizados de `platform`; Stage 3 añade storage/conector/RBAC dedicados. El metastore France Central está asignado y su root DEFAULT seguirá vacío por decisión aprobada. Bootstrap conserva estado local. No hay evidencia cloud directa en este repositorio; UC, datos, jobs y SQL no están desplegados. Esta guía no autoriza nuevos comandos. Se alinea con el root [infra/databricks](../../infra/README.md).
+
+El usuario reporta que la identidad cloud-only es Account Admin, Workspace Admin y único Metastore Admin tras una transferencia autorizada por el límite de un admin de metastore. No se documentan identidades, credenciales ni roles Azure de suscripción. El Global Administrator Entra temporal no se retira hasta verificar acceso cloud/provider y recuperación administrativa.
 
 **Evidencia offline (2026-11-03):** el usuario validó `platform`, `bootstrap` y `databricks` con Terraform temporal 1.13.5 Windows amd64 verificado. Los tres roots pasaron fmt/init con backend deshabilitado y lockfile readonly/validate; platform/bootstrap usaron azurerm 4.30.0 y databricks provider 1.80.0. En `platform` se sustituyó el `resource_manager_id` deprecado por el ID del contenedor y el validate final no emitió avisos. Esa evidencia valida código, no la arquitectura live. Posteriormente, el usuario reporta bootstrap, backend remoto de platform, Stage 1 y probes ADLS Gen2 de solo lectura correctos; este repositorio no contiene evidencia cloud directa.
 
@@ -38,12 +40,12 @@ No crear por defecto clusters, jobs, pipelines, SQL Warehouse, Power BI ni secre
 ### Dependiente de cuenta o administrador
 
 - Confirmación de suscripción, tenant, cuotas y elegibilidad de la oferta Free Trial para cada cargo de Databricks.
-- Existencia y asignación por un account admin de un metastore Unity Catalog compatible con France Central; Terraform no lo crea ni lo asigna.
+- El usuario reporta metastore Unity Catalog compatible con France Central y asignado al workspace; Terraform no lo crea ni lo asigna. Su DEFAULT sigue vacío. Stage 3 aporta storage y conector dedicados, pero no configura el root ni acredita autoridad UC.
 - Account admin, metastore admin, grupos Entra reales y propietarios de recursos.
 - Private Link, private DNS y VNet injection quedan diferidos a un diseño posterior; no son requisito de la postura sintética aprobada de Fase 1.
 - Provider Databricks 1.80.0 y permisos/soporte efectivos para crear los objetos UC; esto requiere verificación autorizada, no se infiere del código.
 - AzureRM 4.30.0 requerirá `features {}` y `resource_provider_registrations = "none"` en platform/bootstrap. El plan necesita Azure CLI login con Owner y `ARM_SUBSCRIPTION_ID` local; el ID nunca se comparte ni versiona. `none` evita el registro automático de providers: comprobar en lectura `Microsoft.Storage`, `Microsoft.Authorization` y `Microsoft.Databricks` antes del plan; el usuario reporta solo este último como Registered.
-- Ubicación administrada DEFAULT aprobada para el metastore. El catálogo `tt_ecommerce_synthetic` omite `storage_root`; si no existe esa ubicación, no se aplica el root y se rediseña con el administrador UC. La external location de `lakehouse` no es sustituto de managed storage.
+- El root DEFAULT del metastore existente permanece vacío y ningún plan lo muta/reemplaza. `tt_ecommerce_synthetic` tendrá managed storage a nivel de catálogo, en un child path exclusivo bajo el storage dedicado de Stage 3. `lakehouse` permanece aislado para external location. Esta opción evita el riesgo ForceNew del provider 1.80 sobre root de metastore existente y ambigüedad root/external location.
 
 ### Fuera del MVP inicial
 
@@ -75,7 +77,7 @@ La conservación del workspace no demuestra ausencia de coste: ADLS y otros recu
 
 - IDs de tenant/suscripción, nombres disponibles, etiquetas y contactos de alertas.
 - Rol efectivo del principal Terraform y separación entre operador humano/CI.
-- Metastore, account admin, modalidad autorizada de UC y soporte/permisos exactos de Terraform para storage credential, external location y grants.
+- Autenticación Terraform cloud, parent external location y child path de catálogo aprobados, grupo escritor de mínimo privilegio y membresía efectiva, modalidad UC y soporte/permisos exactos de Terraform para credential, external location y grants.
 - Cuotas, elegibilidad Free Trial/Premium y cálculo retail vigente en France Central.
 - Alcance, moneda y destinatarios del presupuesto mensual que el usuario reporta como 50 EUR con alertas 40%/100%.
 - Gates UC, evidencia de coste/uso y momento/diseño de private networking posterior.

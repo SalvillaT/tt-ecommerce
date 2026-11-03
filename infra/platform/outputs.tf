@@ -18,3 +18,13 @@ output "databricks_access_connector_id" {
 output "databricks_access_connector_principal_id" {
   value = azurerm_databricks_access_connector.lakehouse.identity[0].principal_id
 }
+
+output "uc_access_connector_id" {
+  description = "Resource ID of the dedicated SystemAssigned Access Connector for Unity Catalog managed storage (non-sensitive identifier)."
+  value       = azurerm_databricks_access_connector.uc_managed.id
+}
+
+output "uc_access_connector_principal_id" {
+  description = "Entra object ID (principal ID) of the dedicated UC managed-storage Access Connector system identity; non-sensitive identifier for use in Unity Catalog external-location/metastore configuration outside this root."
+  value       = azurerm_databricks_access_connector.uc_managed.identity[0].principal_id
+}

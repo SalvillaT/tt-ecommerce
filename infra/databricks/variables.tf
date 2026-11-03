@@ -4,13 +4,13 @@ variable "databricks_host" {
 }
 
 variable "unity_catalog_prerequisites_confirmed" {
-  description = "Set true only after a UC administrator confirms an existing metastore is assigned and the applying identity has the required workspace/UC role and object-owner authority."
+  description = "Set true only after a UC administrator confirms: an existing UC metastore is ASSIGNED to this workspace in the France Central region; the applying cloud operator (Terraform identity) is both Workspace Admin and Metastore Admin; the dedicated system-assigned Access Connector has Storage Blob Data Contributor on the uc-managed container only. The applying identity and role requirements do not change by adding UC-managed catalog storage."
   type        = bool
   default     = false
 }
 
-variable "metastore_default_managed_storage_confirmed" {
-  description = "Set true only after the UC administrator confirms the assigned metastore has an approved DEFAULT managed-storage location. Catalog and schemas intentionally omit storage_root."
+variable "catalog_managed_storage_confirmed" {
+  description = "Set true only after the catalog-level managed-storage decision is approved: the parent uc-managed container external location is approved, and the catalog managed root is the exclusive subpath catalogs/<catalog_name> under it (no shared paths, no metastore DEFAULT/ root usage). Currently managed by catalog storage_root, never by metastore default."
   type        = bool
   default     = false
 }
@@ -36,7 +36,7 @@ variable "engineer_writer_group_name" {
 }
 
 variable "catalog_name" {
-  description = "Unity Catalog catalog name for synthetic tt-ecommerce data. It uses the metastore DEFAULT managed-storage location."
+  description = "Unity Catalog catalog name for synthetic tt-ecommerce data. Its managed storage_root is the exclusive subpath catalogs/<catalog_name> inside the isolated uc-managed container external location."
   type        = string
   default     = "tt_ecommerce_synthetic"
 
@@ -47,8 +47,18 @@ variable "catalog_name" {
 }
 
 variable "access_connector_id" {
-  description = "Azure Databricks Access Connector resource ID from the platform root."
+  description = "Access Connector resource ID from the platform root, for the existing lakehouse Azure Managed Identity credential."
   type        = string
+}
+
+variable "uc_managed_access_connector_id" {
+  description = "Dedicated system-assigned Access Connector resource ID from platform Stage 3 (uc-managed container). Must never reuse the lakehouse connector ID."
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.uc_managed_access_connector_id)) > 0
+    error_message = "uc_managed_access_connector_id must be a non-empty Access Connector resource ID."
+  }
 }
 
 variable "storage_account_name" {
