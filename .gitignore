@@ -13,6 +13,8 @@
 *.tfstate.*
 *.tfvars
 *.tfvars.json
+backend.hcl
+*.tfbackend
 *.tfplan
 *.tfplan.json
 crash.log
@@ -25,6 +27,7 @@ override.tf.json
 # Databricks y datos generados localmente
 .databricks/
 .bundle/
+data/generated/
 data/raw/
 data/bronze/
 data/silver/

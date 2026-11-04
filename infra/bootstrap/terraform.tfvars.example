@@ -1,0 +1,3 @@
+# resource_group_name  = "rg-tt-state-frc"
+# location             = "francecentral" # default; state root remains independent of platform
+# storage_account_name = "sttttfstatefrc01" # must be globally unique

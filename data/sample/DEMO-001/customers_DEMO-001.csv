@@ -1,0 +1,12 @@
+customer_id,record_version,updated_at,region_code,email,phone,deleted_at
+CUS-001,1,2026-01-01T08:00:00Z,ES-MD,ana.001@example.test,+34000000001,
+CUS-002,1,2026-01-01T08:00:00Z,ES-CT,bruno.002@example.test,,
+CUS-003,1,2026-01-01T08:00:00Z,ES-MD,clara.003@example.test,,
+CUS-004,1,2026-01-01T08:00:00Z,ES-VL,diego.004@example.test,+34000000004,
+CUS-005,1,2026-01-01T08:00:00Z,ES-CT,eva.005@example.test,,
+CUS-006,1,2026-01-01T08:00:00Z,ES-MD,fede.006@example.test,+34000000006,
+CUS-007,1,2026-01-01T08:00:00Z,ES-VC,gina.007@example.test,,
+CUS-008,1,2026-01-01T08:00:00Z,ES-MD,hugo.008@example.test,+34000000009,
+CUS-009,1,2026-01-01T08:00:00Z,ES-MD,iris.009@example.test,+34000000010,
+CUS-SOS-NOPHONE,1,2026-01-01T08:00:00Z,ES-VC,lara.nophone@example.test,,
+CUS-NULL-EMAIL,1,2026-01-01T08:00:00Z,ES-MD,,+34000000008,
