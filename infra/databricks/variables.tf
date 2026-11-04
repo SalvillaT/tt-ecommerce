@@ -1,6 +1,11 @@
 variable "databricks_host" {
-  description = "Existing Azure Databricks workspace URL, for example https://adb-<id>.<region>.azuredatabricks.net."
+  description = "Azure Databricks workspace URL, for example https://adb-<workspace-id>.<region>.azuredatabricks.net. The provider authenticates using Azure CLI as the cloud-only Entra UC admin already logged in via 'az login' in the current environment; do not add account_id or a Databricks CLI profile to this provider."
   type        = string
+
+  validation {
+    condition     = length(trimspace(var.databricks_host)) > 0 && can(regex("^https://", trimspace(var.databricks_host)))
+    error_message = "databricks_host must be a non-empty workspace URL starting with https://."
+  }
 }
 
 variable "unity_catalog_prerequisites_confirmed" {

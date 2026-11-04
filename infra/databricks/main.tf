@@ -1,8 +1,8 @@
 resource "terraform_data" "unity_catalog_gate" {
   input = {
-    metastore_and_identity_confirmed = var.unity_catalog_prerequisites_confirmed
-    catalog_managed_storage_confirmed  = var.catalog_managed_storage_confirmed
-    writer_group_confirmed           = var.approved_engineer_writer_group_confirmed
+    metastore_and_identity_confirmed  = var.unity_catalog_prerequisites_confirmed
+    catalog_managed_storage_confirmed = var.catalog_managed_storage_confirmed
+    writer_group_confirmed            = var.approved_engineer_writer_group_confirmed
   }
 
   lifecycle {
@@ -44,8 +44,8 @@ resource "databricks_external_location" "lakehouse" {
 }
 
 resource "databricks_catalog" "synthetic" {
-  name         = var.catalog_name
-  comment      = "Terraform-managed catalog for the synthetic tt-ecommerce project."
+  name    = var.catalog_name
+  comment = "Terraform-managed catalog for the synthetic tt-ecommerce project."
   # Catalog-level managed storage: exclusive subpath inside the isolated
   # uc-managed container; never the metastore root or lakehouse location.
   storage_root = local.catalog_managed_storage_root

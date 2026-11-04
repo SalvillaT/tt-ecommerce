@@ -11,7 +11,7 @@ No root creates its own state backend. Do not commit
 | `platform` | Resource group, ADLS Gen2 storage, lake paths, Databricks Premium workspace, and connector identity | Base deployment |
 | `databricks` | Phase 1 workspace-level UC credential/external location, synthetic catalog, Bronze/Silver/quarantine/Gold schemas, and minimal writer grants; optional Phase 5 SQL Warehouse | Explicitly gated; SQL is off by default |
 
-The planned region for `platform` and optional `bootstrap` is **France Central**. A user-observed West Europe portal warning is not evidence that France Central supports this subscription, Free Trial quota, or Databricks Premium. The user reports Stages 1–3 of `platform` applied: seven paths plus private managed-storage infrastructure with its dedicated connector and container-scoped grant. Approved UC design leaves the existing metastore DEFAULT root empty: the synthetic catalog will use a child managed-storage path under the dedicated storage, while `lakehouse` remains isolated for external location. No plan may mutate or replace the metastore. The user also reports the cloud-only identity is Account Admin, Workspace Admin and sole Metastore Admin after an authorized transfer; it has no reported Azure subscription roles. Retain temporary Global Administrator until cloud/provider authentication and administrative recovery are verified. Databricks UC is not deployed. This repository holds no direct cloud evidence. For the approved future-session lifecycle (keep `platform`; stop active compute rather than destroy infrastructure), see [Fase 1 development cycle](../docs/fase-1/CICLO_DE_DESARROLLO.md). Phase 1 gates still govern any provider operation.
+The planned region for `platform` and optional `bootstrap` is **France Central**. A user-observed West Europe portal warning is not evidence that France Central supports this subscription, Free Trial quota, or Databricks Premium. The user reports Stages 1–3 of `platform` applied: seven paths plus private managed-storage infrastructure with its dedicated connector and container-scoped grant. Approved UC design leaves the existing metastore DEFAULT root empty: the synthetic catalog uses a catalog-level managed-storage root, while `lakehouse` remains isolated for external location. No plan may mutate or replace the metastore. The user also reports the cloud-only identity is Account Admin, Workspace Admin and sole Metastore Admin after an authorized transfer; it has no reported Azure subscription roles. Databricks CLI v1.22.1 is installed and a local workspace OAuth profile authenticated `current-user me` with exit 0. A separate cloud-only non-admin engineer identity, an engineering account group, and its membership were created; the group has Workspace access only, with no consumer/SQL/admin, unrestricted clusters, or pools. User-reported final checks confirm the UC objects/grants via direct read-only calls, permitted catalog/schema reads and denied external-location/credential access for the restricted writer identity. The final post-removal Terraform plan converged with 0 add/change/destroy, while the administrative Databricks profile remained operational. A monthly 50 EUR subscription budget with alerts is reported created; forecast charges cited by the user belong to other subscription projects. Inventory reports 0 clusters, 0 jobs, and one pre-existing stopped SQL Warehouse; Terraform keeps SQL Warehouse disabled and did not create it. No synthetic project data, jobs, compute, or started SQL Warehouse exist. Fase 1 is closed according to user-reported evidence; later data, job, compute, and SQL/BI phases remain separate. This is user-reported, not independent cloud evidence. Do not use cleanup, `destroy`, or `-target`. For the approved future-session lifecycle (keep `platform`; stop active compute rather than destroy infrastructure), see [Fase 1 development cycle](../docs/fase-1/CICLO_DE_DESARROLLO.md). Phase 1 gates are closed; future phases require their own gates.
 
 ## Safe deployment order
 
@@ -58,11 +58,12 @@ The planned region for `platform` and optional `bootstrap` is **France Central**
 4. Before using `databricks`, an administrator must confirm an existing Unity
    Catalog metastore is assigned to the workspace, the applying identity has the
    required workspace/UC role and object-owner authority, and the metastore has
-   an approved **DEFAULT** managed-storage location. Set
+    an approved parent external location and catalog child path for managed
+    storage. Set
    `unity_catalog_prerequisites_confirmed = true` and
    `metastore_default_managed_storage_confirmed = true` only then. This root
    does not create or assign an account-level metastore. The user reports its
-   DEFAULT root is intentionally left empty, while Stage 3 provides dedicated
+    DEFAULT root is intentionally left empty, while Stage 3 provides dedicated
    private managed storage, connector, and container-scoped grant. Add the
    approved identity to the workspace and verify workspace/metastore authority.
    Then configure the approved parent external location and catalog child path
@@ -78,12 +79,11 @@ The planned region for `platform` and optional `bootstrap` is **France Central**
    non-versioned name of one approved existing account group and set
    `approved_engineer_writer_group_confirmed = true`. No group is created.
    The root creates catalog `tt_ecommerce_synthetic` by default and empty
-   `bronze`, `silver`, `quarantine`, and `gold` schemas **without**
-   `storage_root`; their managed tables therefore require the approved metastore
-   DEFAULT location. Do not substitute the `lakehouse` external location as a
-   managed-storage root. If the metastore has no approved DEFAULT location, do
-   not apply this root: obtain that decision/configuration from the UC admin
-   first.
+    `bronze`, `silver`, `quarantine`, and `gold` schemas with the approved
+    catalog child path for managed storage. Do not substitute the `lakehouse`
+    external location as a managed-storage root. If the parent external location
+    or child path has not been approved, do not apply this root: obtain that
+    decision/configuration from the UC admin first.
 
 The Phase 1 IaC declares only `USE_CATALOG` plus `USE_SCHEMA` and
 `CREATE_TABLE` on each schema for the writer group, through principal-scoped
