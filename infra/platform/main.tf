@@ -286,3 +286,14 @@ resource "azurerm_role_assignment" "uc_managed_connector_storage_blob_data_contr
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_databricks_access_connector.uc_managed.identity[0].principal_id
 }
+
+# Unity Catalog managed storage (Bronze CREATE TABLE) requires the UC
+# connector's identity to request user delegation keys, which no container
+# data role authorizes. Storage Blob Delegator on the storage account grants
+# that request while keeping the data-plane Contributor at the uc-managed
+# container scope.
+resource "azurerm_role_assignment" "uc_managed_connector_storage_blob_delegator" {
+  scope                = azurerm_storage_account.lake.id
+  role_definition_name = "Storage Blob Delegator"
+  principal_id         = azurerm_databricks_access_connector.uc_managed.identity[0].principal_id
+}
