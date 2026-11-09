@@ -203,7 +203,7 @@ resource "terraform_data" "phase2_landing_access_connector_gate" {
   lifecycle {
     precondition {
       condition     = var.phase2_landing_access_connector_approved
-      error_message = "Phase 2 landing Access Connector is enabled but not approved. Set phase2_landing_access_connector_approved = true only after approving its Storage Blob Data Reader scope on the landing container only."
+      error_message = "Phase 2 landing Access Connector is enabled but not approved. Set phase2_landing_access_connector_approved = true only after approving its two scopes: Storage Blob Data Reader on the landing container and Storage Blob Delegator on the landing storage account."
     }
   }
 }
@@ -235,6 +235,25 @@ resource "azurerm_role_assignment" "phase2_landing_connector_storage_blob_data_r
 
   scope                = azurerm_storage_container.lake["landing"].id
   role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_databricks_access_connector.phase2_landing[0].identity[0].principal_id
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+}
+
+# The Unity Catalog external-location landing preflight requests a user
+# delegation key, which the container Reader role alone does not authorize.
+# Storage Blob Delegator on the storage account grants exactly that request
+# (and SAS user-delegation signing); it stays distinct from the Reader scope
+# and never replaces it with a broader container or account data role.
+resource "azurerm_role_assignment" "phase2_landing_connector_storage_blob_delegator" {
+  count = var.enable_phase2_landing_access_connector && var.phase2_landing_access_connector_approved ? 1 : 0
+
+  scope                = azurerm_storage_account.lake.id
+  role_definition_name = "Storage Blob Delegator"
   principal_id         = azurerm_databricks_access_connector.phase2_landing[0].identity[0].principal_id
 
   lifecycle {

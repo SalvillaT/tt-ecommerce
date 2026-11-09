@@ -35,6 +35,6 @@ output "phase2_landing_access_connector_id" {
 }
 
 output "phase2_landing_access_connector_principal_id" {
-  description = "Null unless the separately approved Phase 2 landing Access Connector is enabled; its identity has Storage Blob Data Reader on the landing container only."
+  description = "Null unless the separately approved Phase 2 landing Access Connector is enabled; its identity has Storage Blob Data Reader on the landing container and Storage Blob Delegator on the landing storage account."
   value       = try(azurerm_databricks_access_connector.phase2_landing[0].identity[0].principal_id, null)
 }

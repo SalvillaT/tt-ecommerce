@@ -67,7 +67,7 @@ variable "enable_phase2_landing_access_connector" {
 }
 
 variable "phase2_landing_access_connector_approved" {
-  description = "Phase 2 landing Access Connector approval. Set true only after its read-only landing scope is approved; it has no effect unless enable_phase2_landing_access_connector is also true. Its plan/apply is a separate human authorization and is not transactional with other Phase 2 changes."
+  description = "Phase 2 landing Access Connector approval. Set true only after its two scopes are approved: Storage Blob Data Reader on the landing container and Storage Blob Delegator on the landing storage account; it has no effect unless enable_phase2_landing_access_connector is also true. Its plan/apply is a separate human authorization and is not transactional with other Phase 2 changes."
   type        = bool
   default     = false
 }
