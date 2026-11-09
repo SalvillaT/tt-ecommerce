@@ -20,8 +20,10 @@ from typing import Mapping
 from pipelines.bronze.layout import LandingLayout, join_landing_uri, landing_relative_path
 from pipelines.bronze.manifest import ManifestPreflightError
 from pipelines.bronze.remote_preflight import (
+    MAX_DIRECTORY_ENTRIES,
     MAX_OBJECT_BYTES,
     RemotePreflightError,
+    list_batch_directory,
     read_binary_object,
     remote_preflight,
 )
@@ -225,6 +227,49 @@ class SparkConnectRowsSpark(FakeBinarySpark):
                 return [SparkConnectRow(row) for row in super().collect()]
 
         return ConnectReader(self)
+
+
+class FlatFilePathSpark(FakeBinarySpark):
+    """Fake whose metadata-only listing pass emits REAL-Spark-shaped rows.
+
+    Real Spark commonly ALIASES `select("_metadata.file_path")` to a plain
+    top-level `file_path` column, so the listing rows normalize to just
+    {"file_path": <uri>}. All other passes behave like FakeBinarySpark
+    ({"length": n, "content": b} object rows). Only the flatten LISTING
+    representation differs.
+    """
+
+    @property
+    def read(self):
+        class FlatRowsReader(FakeReader):
+            def collect(self):
+                if self._listing is not None:
+                    uri = self._spark.uris[-1]
+                    entries = self._listing if self._limit is None else self._listing[:self._limit]
+                    self._spark.listings.append((uri, tuple(entries)))
+                    return [{"file_path": path} for path in entries]
+                return super().collect()
+
+        return FlatRowsReader(self)
+
+
+class SparkConnectFlatFilePathSpark(FakeBinarySpark):
+    """Serverless-regression shape: Spark Connect rows AND the real-Spark
+    flat `file_path` listing alias (the exact reported cloud conditions).
+    """
+
+    @property
+    def read(self):
+        class ConnectFlatReader(FakeReader):
+            def collect(self):
+                if self._listing is not None:
+                    uri = self._spark.uris[-1]
+                    entries = self._listing if self._limit is None else self._listing[:self._limit]
+                    self._spark.listings.append((uri, tuple(entries)))
+                    return [SparkConnectRow({"file_path": path}) for path in entries]
+                return [SparkConnectRow(row) for row in super().collect()]
+
+        return ConnectFlatReader(self)
 
 
 def canonical_remote_objects(ready_bytes: bytes | None = None) -> tuple[str, dict[str, bytes]]:
@@ -754,6 +799,98 @@ class RemotePreflightContract(unittest.TestCase):
             read_binary_object(spark, "abfss://fs@host/bogus")
         self.assertIn("unsupported row object", str(caught.exception))
         self.assertIn("BogusRow", str(caught.exception))
+
+    # --- Regression: real-Spark flat `file_path` listing rows ---------------
+
+    def test_listing_accepts_flat_file_path_row_representation(self):
+        # Real Spark aliases `select("_metadata.file_path")` to a top-level
+        # `file_path` column: the rows normalize to {"file_path": <uri>} with
+        # NO `_metadata.file_path` and NO nested `_metadata`. This is the
+        # third documented representation and it FAILED before the fix
+        # (`returned a non-path entry`).
+        layout = LandingLayout()
+        directory = layout.final_directory_uri("orders", BATCH, ARRIVAL, ROOT_URI)
+        approved = layout.final_file_uri("orders", BATCH, ARRIVAL, ROOT_URI)
+        spark = FlatFilePathSpark(canonical_remote_objects()[1])
+        paths = list_batch_directory(spark, directory)
+        self.assertEqual(paths, (approved,))
+        # Prove the fake really emitted only the flat representation (the
+        # pre-fix lookup would see nothing at all in these rows).
+        self.assertEqual(spark.listings, [(directory, (approved,))])
+
+    def test_full_remote_preflight_with_spark_connect_flat_file_path_rows(self):
+        # Full cloud-regression shape: Spark Connect Row objects on object
+        # reads AND flat `file_path` rows on the metadata-only listings — the
+        # exact condition where the run previously died in list_batch_directory.
+        spark = SparkConnectFlatFilePathSpark(canonical_remote_objects()[1])
+        result = remote_preflight(spark, landing_root=ROOT_URI, batch_id=BATCH,
+                                  arrival_date=ARRIVAL)
+        self.assertEqual([r.source for r in result.receipts],
+                         ["orders", "customers", "products"])
+        self.assertEqual(result.total_rows, 44)
+        # The directory audits ran and satisfied exactly-one per source.
+        self.assertEqual(len(spark.listings), 3)
+        self.assertTrue(all(len(entries) == 1 for _, entries in spark.listings))
+
+    def test_listing_rejects_missing_invalid_or_empty_paths_in_all_shapes(self):
+        # The representation widening must NOT soften the contract: a row
+        # whose every representation is absent, non-string or empty is still
+        # a `non-path entry` rejection.
+        class StaticListingReader:
+            def __init__(self, rows: dict):
+                self._rows = rows
+                self._options: dict = {}
+
+            def format(self, name):
+                if name != "binaryFile":
+                    raise AssertionError(f"preflight must use binaryFile, got {name}")
+                return self
+
+            def option(self, key, value):
+                self._options[key] = value
+                return self
+
+            def load(self, uri):
+                self._loaded = uri
+                return self
+
+            def select(self, *columns):
+                if list(columns) != ["_metadata.file_path"]:
+                    raise AssertionError(f"unexpected listing projection: {columns}")
+                return self
+
+            def limit(self, count):
+                if count != MAX_DIRECTORY_ENTRIES:
+                    raise AssertionError("listing bound must reach the driver pass")
+                return self
+
+            def collect(self):
+                if self._options.get("recursiveFileLookup") is not True:
+                    raise AssertionError("listing must keep recursiveFileLookup=True")
+                return self._rows
+
+        class StaticListingsSpark(FakeBinarySpark):
+            def __init__(self, rows: dict):
+                super().__init__({})
+                self._rows = rows
+
+            @property
+            def read(self):
+                return StaticListingReader(self._rows)
+
+        directory = "abfss://landing@example.dfs.core.windows.net/orders/x"
+        rejected = ([{"length": 5}],                              # absent everywhere
+                    [{"file_path": 7}],                           # non-string flat
+                    [{"file_path": ""}],                          # empty flat
+                    [{"_metadata.file_path": 7}],                 # non-string dotted
+                    [{"_metadata.file_path": ""}],                # empty dotted
+                    [{"_metadata": {"file_path": None}}])         # non-string nested
+        for rows in rejected:
+            with self.subTest(rows=rows):
+                with self.assertRaises(RemotePreflightError) as caught:
+                    list_batch_directory(StaticListingsSpark(rows), directory)
+                self.assertIn("non-path entry", str(caught.exception))
+                self.assertIn(directory, str(caught.exception))
 
 
 if __name__ == "__main__":

@@ -252,6 +252,13 @@ def list_batch_directory(spark, directory_uri: str,
             # struct as {"_metadata": {"file_path": ...}} instead of the flat
             # column name, so accept both shapes.
             path = normalized["_metadata"].get("file_path")
+        if path is None:
+            # Third documented representation: real Spark commonly ALIASES
+            # the struct-field selection to a plain top-level column, so the
+            # normalized row is just {"file_path": <uri>}. Only consulted
+            # when neither metadata shape yielded a value (metadata shapes
+            # keep precedence over this fallback).
+            path = normalized.get("file_path")
         if not isinstance(path, str) or not path:
             raise RemotePreflightError(
                 f"directory listing of {directory_uri} returned a non-path entry")
