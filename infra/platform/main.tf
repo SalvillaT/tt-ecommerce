@@ -13,6 +13,23 @@ locals {
   uc_managed_container_name = "uc-managed"
   uc_access_connector_name  = "dbac-${var.name_prefix}-ucm-${local.region_suffix}"
 
+  # Phase 2 uses its own connector and must never broaden the existing
+  # lakehouse or UC-managed connector scopes.
+  phase2_landing_access_connector_name = "dbac-${var.name_prefix}-landing-${local.region_suffix}"
+
+  # Deliberately separate from data_lake_directories so Stage 2 addresses and
+  # controls are immutable. _control is an explicit HNS parent before its
+  # children are created.
+  phase2_landing_directory_roots = {
+    landing_staging = { filesystem = "landing", path = "_staging" }
+    landing_control = { filesystem = "landing", path = "_control" }
+  }
+
+  phase2_landing_directory_children = {
+    landing_control_manifests = { filesystem = "landing", path = "_control/manifests" }
+    landing_control_ready     = { filesystem = "landing", path = "_control/ready" }
+  }
+
   # Least privilege: the Terraform operator is granted Blob Data Contributor
   # ONLY on landing/lakehouse. This explicit set (rather than the container
   # collection) must never expand to uc-managed or the storage account scope;
@@ -97,6 +114,59 @@ resource "azurerm_storage_data_lake_gen2_path" "directories" {
   depends_on = [azurerm_role_assignment.operator_storage_blob_data_contributor]
 }
 
+resource "terraform_data" "phase2_landing_layout_gate" {
+  count = var.enable_phase2_landing_layout ? 1 : 0
+
+  input = var.phase2_landing_layout_approved
+
+  lifecycle {
+    precondition {
+      condition     = var.phase2_landing_layout_approved
+      error_message = "Phase 2 landing layout is enabled but not approved. Set phase2_landing_layout_approved = true only after approving landing/_staging, landing/_control/manifests, and landing/_control/ready. Existing Stage 2 flags and paths are independent."
+    }
+  }
+}
+
+resource "azurerm_storage_data_lake_gen2_path" "phase2_landing_directory_roots" {
+  for_each = var.enable_phase2_landing_layout && var.phase2_landing_layout_approved ? local.phase2_landing_directory_roots : {}
+
+  path               = each.value.path
+  filesystem_name    = azurerm_storage_container.lake[each.value.filesystem].name
+  storage_account_id = azurerm_storage_account.lake.id
+  resource           = "directory"
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    azurerm_role_assignment.operator_storage_blob_data_contributor,
+    terraform_data.phase2_landing_layout_gate,
+  ]
+}
+
+resource "azurerm_storage_data_lake_gen2_path" "phase2_landing_directory_children" {
+  for_each = var.enable_phase2_landing_layout && var.phase2_landing_layout_approved ? local.phase2_landing_directory_children : {}
+
+  path               = each.value.path
+  filesystem_name    = azurerm_storage_container.lake[each.value.filesystem].name
+  storage_account_id = azurerm_storage_account.lake.id
+  resource           = "directory"
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  # The HNS parent landing/_control is explicit rather than inferred.
+  depends_on = [
+    azurerm_storage_data_lake_gen2_path.phase2_landing_directory_roots,
+  ]
+}
+
 resource "azurerm_databricks_workspace" "lakehouse" {
   name                          = local.databricks_name
   resource_group_name           = azurerm_resource_group.platform.name
@@ -123,6 +193,55 @@ resource "azurerm_role_assignment" "connector_storage_blob_data_contributor" {
   scope                = azurerm_storage_container.lake["lakehouse"].id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_databricks_access_connector.lakehouse.identity[0].principal_id
+}
+
+resource "terraform_data" "phase2_landing_access_connector_gate" {
+  count = var.enable_phase2_landing_access_connector ? 1 : 0
+
+  input = var.phase2_landing_access_connector_approved
+
+  lifecycle {
+    precondition {
+      condition     = var.phase2_landing_access_connector_approved
+      error_message = "Phase 2 landing Access Connector is enabled but not approved. Set phase2_landing_access_connector_approved = true only after approving its Storage Blob Data Reader scope on the landing container only."
+    }
+  }
+}
+
+resource "azurerm_databricks_access_connector" "phase2_landing" {
+  count = var.enable_phase2_landing_access_connector && var.phase2_landing_access_connector_approved ? 1 : 0
+
+  name                = local.phase2_landing_access_connector_name
+  resource_group_name = azurerm_resource_group.platform.name
+  location            = azurerm_resource_group.platform.location
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  depends_on = [terraform_data.phase2_landing_access_connector_gate]
+}
+
+resource "azurerm_role_assignment" "phase2_landing_connector_storage_blob_data_reader" {
+  count = var.enable_phase2_landing_access_connector && var.phase2_landing_access_connector_approved ? 1 : 0
+
+  scope                = azurerm_storage_container.lake["landing"].id
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_databricks_access_connector.phase2_landing[0].identity[0].principal_id
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_storage_container" "uc_managed" {

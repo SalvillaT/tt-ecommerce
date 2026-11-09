@@ -1,0 +1,102 @@
+# TT E-commerce Bronze ingestion Declarative Automation Bundle (Fase 2).
+#
+# Static bundle definition only: deploys/validates after the GF2 gates and a
+# separate human authorization. No schedule: the job is manual/visible, one
+# run at a time (job-level max_concurrent_runs=1) with retries 0. The run-as
+# identity is a bundle VARIABLE without a default value/secret: the operator
+# supplies the approved application (client) ID at validate/deploy/run time.
+# Serverless environment is conditional: target `development_serverless`
+# (default) attaches environment_key/spec; `development_classic` deliberately
+# omits both when Serverless Jobs is not available (GF2-7 decision).
+bundle:
+  name: tt-ecommerce-bronze
+
+include:
+  - resources/*.yml
+
+# Only ship what the job executes: the pipelines package and its root script.
+# Tests, docs, infra and data fixtures are never synchronized.
+sync:
+  include:
+    - pipelines
+    - scripts
+  exclude:
+    - tests/**
+    - docs/**
+    - data/**
+    - infra/**
+    - .slim/**
+
+variables:
+  run_as_service_principal_name:
+    description: >-
+      Application (client) ID of the approved run-as service principal.
+      Supplied explicitly by the operator during validate/deploy/run (e.g.
+      --var "run_as_service_principal_name=<sp-app-id>"); it is never a
+      secret and is never stored in this bundle.
+    default: ""
+  landing_root:
+    description: >-
+      Non-secret abfss:// root of the landing filesystem used by the job
+      (inside the granted external locations: landing/orders, customers,
+      products and _control; never _staging). Example:
+      abfss://landing@<storage_account>.dfs.core.windows.net
+    default: ""
+  environment_key:
+    description: >-
+      Serverless environment key used only by the development_serverless
+      target. Do not change unless the serverless environment policy is
+      reviewed.
+    default: bronze_env
+  classic_spark_version:
+    description: >-
+      Spark runtime for the development_classic fallback target; only used
+      when serverless is unavailable AND GF2-7 classic compute is approved for
+      every run. Keep versions aligned with the workspace LTS policy review.
+    default: 15.4.x-scala2.12
+  classic_node_type_id:
+    description: >-
+      Node type for the development_classic fallback job cluster (single
+      worker, auto-terminated). Costed under GF2-7 per approval.
+    default: Standard_E4s_v3
+
+targets:
+  development_serverless:
+    default: true
+    mode: development
+    variables:
+      environment_key: bronze_env
+    resources:
+      jobs:
+        bronze_synthetic_ingestion_job:
+          # Conditional serverless support: attached only in this target.
+          environments:
+            - environment_key: ${var.environment_key}
+              spec:
+                client: "1"
+          tasks:
+            - task_key: bronze_ingestion
+              environment_key: ${var.environment_key}
+
+  development_classic:
+    mode: development
+    # Serverless unavailable (GF2-7 fallback): the task keeps max_retries 0
+    # and the job keeps max_concurrent_runs 1 and no schedule; compute is an
+    # explicitly approved ephemeral classic job cluster with auto-termination.
+    variables:
+      classic_spark_version: 15.4.x-scala2.12
+      classic_node_type_id: Standard_E4s_v3
+    resources:
+      jobs:
+        bronze_synthetic_ingestion_job:
+          job_clusters:
+            - job_cluster_key: bronze_classic
+              new_cluster:
+                spark_version: ${var.classic_spark_version}
+                node_type_id: ${var.classic_node_type_id}
+                num_workers: 1
+                data_security_mode: SINGLE_USER
+                autotermination_minutes: 30
+          tasks:
+            - task_key: bronze_ingestion
+              job_cluster_key: bronze_classic

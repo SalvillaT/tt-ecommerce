@@ -28,3 +28,13 @@ output "uc_access_connector_principal_id" {
   description = "Entra object ID (principal ID) of the dedicated UC managed-storage Access Connector system identity; non-sensitive identifier for use in Unity Catalog external-location/metastore configuration outside this root."
   value       = azurerm_databricks_access_connector.uc_managed.identity[0].principal_id
 }
+
+output "phase2_landing_access_connector_id" {
+  description = "Null unless the separately approved Phase 2 landing Access Connector is enabled."
+  value       = try(azurerm_databricks_access_connector.phase2_landing[0].id, null)
+}
+
+output "phase2_landing_access_connector_principal_id" {
+  description = "Null unless the separately approved Phase 2 landing Access Connector is enabled; its identity has Storage Blob Data Reader on the landing container only."
+  value       = try(azurerm_databricks_access_connector.phase2_landing[0].identity[0].principal_id, null)
+}

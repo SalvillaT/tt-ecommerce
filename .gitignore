@@ -52,3 +52,9 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+
+#Documentacion para agentes
+.slim/
+codemap.md
+**/codemap.md
+AGENTS.md

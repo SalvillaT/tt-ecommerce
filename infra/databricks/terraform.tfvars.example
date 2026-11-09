@@ -5,3 +5,12 @@
 # unity_catalog_prerequisites_confirmed = false
 # catalog_managed_storage_confirmed     = false
 # enable_sql_warehouse                  = false
+# Phase 2 foundation is opt-in. Copy the landing connector output and existing
+# dedicated job application ID only after separate approval; do not add secrets.
+# Its plan/apply is a separate human authorization, applies are not transactional
+# and failures must be reconciled. After apply, never reset the enable flag to
+# false: retirement requires a reviewed dedicated code change.
+# enable_phase2_ingestion_foundation    = false
+# phase2_ingestion_foundation_approved  = false
+# landing_access_connector_id           = null
+# phase2_job_run_as_application_id      = null

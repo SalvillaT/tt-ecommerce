@@ -43,6 +43,106 @@ resource "databricks_external_location" "lakehouse" {
   depends_on = [terraform_data.unity_catalog_gate]
 }
 
+resource "terraform_data" "phase2_ingestion_foundation_gate" {
+  count = var.enable_phase2_ingestion_foundation ? 1 : 0
+
+  input = {
+    approved                    = var.phase2_ingestion_foundation_approved
+    landing_access_connector_id = var.landing_access_connector_id
+    job_run_as_application_id   = var.phase2_job_run_as_application_id
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.phase2_ingestion_foundation_approved
+      error_message = "Phase 2 ingestion foundation is enabled but not approved. Set phase2_ingestion_foundation_approved = true only after approving the dedicated landing connector, four read-only source paths, and managed pipeline state design."
+    }
+
+    precondition {
+      condition     = var.landing_access_connector_id != null && length(trimspace(var.landing_access_connector_id)) > 0
+      error_message = "Phase 2 ingestion foundation requires a non-empty landing_access_connector_id from the separately approved platform landing Access Connector."
+    }
+
+    precondition {
+      condition     = var.phase2_job_run_as_application_id != null && length(trimspace(var.phase2_job_run_as_application_id)) > 0
+      error_message = "Phase 2 ingestion foundation requires a non-empty phase2_job_run_as_application_id for an existing Databricks service principal."
+    }
+  }
+}
+
+# The service principal is an existing identity. The lookup validates that it
+# exists in Databricks; Terraform does not create or manage it or its Entra app.
+data "databricks_service_principal" "phase2_job_run_as" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  application_id = var.phase2_job_run_as_application_id
+}
+
+resource "databricks_storage_credential" "phase2_landing" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  name    = "tt-phase2-landing-credential"
+  comment = "Phase 2 managed identity credential for read-only access to approved landing source paths."
+
+  azure_managed_identity {
+    access_connector_id = var.landing_access_connector_id
+  }
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+locals {
+  # No location is defined for landing/_staging. Local users/operators upload
+  # there through their existing Azure permissions; the job gets neither UC
+  # access nor direct Azure RBAC to staging.
+  phase2_landing_external_locations = {
+    orders = {
+      name = "tt_phase2_landing_orders"
+      path = "orders"
+    }
+    customers = {
+      name = "tt_phase2_landing_customers"
+      path = "customers"
+    }
+    products = {
+      name = "tt_phase2_landing_products"
+      path = "products"
+    }
+    control = {
+      name = "tt_phase2_landing_control"
+      path = "_control"
+    }
+  }
+}
+
+resource "databricks_external_location" "phase2_landing" {
+  for_each = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? local.phase2_landing_external_locations : {}
+
+  name            = each.value.name
+  url             = "abfss://landing@${var.storage_account_name}.dfs.core.windows.net/${each.value.path}"
+  credential_name = databricks_storage_credential.phase2_landing[0].id
+  comment         = "Phase 2 read-only source location for landing/${each.value.path}; excludes landing/_staging."
+  read_only       = true
+
+  # Do not set skip_validation: the authorized apply must verify Azure RBAC.
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  depends_on = [terraform_data.phase2_ingestion_foundation_gate]
+}
+
 resource "databricks_catalog" "synthetic" {
   name    = var.catalog_name
   comment = "Terraform-managed catalog for the synthetic tt-ecommerce project."
@@ -99,6 +199,43 @@ resource "databricks_schema" "phase1" {
   depends_on = [databricks_catalog.synthetic]
 }
 
+resource "databricks_schema" "phase2_pipeline_state" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  catalog_name = databricks_catalog.synthetic.name
+  name         = "pipeline_state"
+  comment      = "Managed Phase 2 pipeline state schema for checkpoints and operational state."
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    databricks_catalog.synthetic,
+    terraform_data.phase2_ingestion_foundation_gate,
+  ]
+}
+
+resource "databricks_volume" "phase2_ingestion_state" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  name         = "ingestion_state"
+  catalog_name = databricks_catalog.synthetic.name
+  schema_name  = databricks_schema.phase2_pipeline_state[0].name
+  volume_type  = "MANAGED"
+  comment      = "Managed Phase 2 ingestion checkpoint and state volume."
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  depends_on = [terraform_data.phase2_ingestion_foundation_gate]
+}
+
 resource "databricks_grant" "engineer_writer_catalog" {
   catalog = databricks_catalog.synthetic.name
 
@@ -117,6 +254,96 @@ resource "databricks_grant" "engineer_writer_schema" {
   privileges = ["USE_SCHEMA", "CREATE_TABLE"]
 
   depends_on = [terraform_data.unity_catalog_gate]
+}
+
+resource "databricks_grant" "phase2_job_catalog" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  catalog = databricks_catalog.synthetic.name
+
+  principal  = var.phase2_job_run_as_application_id
+  privileges = ["USE_CATALOG"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+resource "databricks_grant" "phase2_job_bronze_schema" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  schema = databricks_schema.phase1["bronze"].id
+
+  principal  = var.phase2_job_run_as_application_id
+  privileges = ["USE_SCHEMA", "CREATE_TABLE"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+resource "databricks_grant" "phase2_job_landing_read" {
+  for_each = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? databricks_external_location.phase2_landing : {}
+
+  external_location = each.value.id
+
+  principal  = var.phase2_job_run_as_application_id
+  privileges = ["READ_FILES"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+resource "databricks_grant" "phase2_job_pipeline_state_schema" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  schema = databricks_schema.phase2_pipeline_state[0].id
+
+  principal  = var.phase2_job_run_as_application_id
+  privileges = ["USE_SCHEMA"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+resource "databricks_grant" "phase2_job_ingestion_state_volume" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  volume = databricks_volume.phase2_ingestion_state[0].id
+
+  principal  = var.phase2_job_run_as_application_id
+  privileges = ["READ_VOLUME", "WRITE_VOLUME"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
 }
 
 resource "terraform_data" "sql_warehouse_phase5_gate" {

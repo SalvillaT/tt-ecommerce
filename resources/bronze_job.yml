@@ -1,0 +1,40 @@
+# Bronze ingestion Job resource (Fase 2 close-out, Fase B).
+#
+# Manual, single-writer job: no schedule (triggered only by an authorized
+# `databricks bundle run ...`), job-level `max_concurrent_runs: 1` and task
+# `max_retries: 0` are the ONLY concurrency/retry semantics; no exactly-once
+# and no cross-table atomicity is claimed anywhere. The run-as service
+# principal comes from the bundle variable (no secret, no embedded identity)
+# and is the sole first creator/owner of Bronze managed tables (GF2-1/GF2-4).
+resources:
+  jobs:
+    bronze_synthetic_ingestion_job:
+      name: tt-ecommerce-bronze-synthetic-ingestion
+      max_concurrent_runs: 1
+
+      # Event-driven parameters only; the operator supplies values per run
+      # (GF2-6 upload + GF2-7 compute authorization). Defaults stay empty:
+      # the entrypoint refuses to run without all three values.
+      parameters:
+        - name: batch_id
+          default: ""
+        - name: arrival_date
+          default: ""
+        - name: landing_root
+          default: ${var.landing_root}
+
+      run_as:
+        service_principal_name: ${var.run_as_service_principal_name}
+
+      tasks:
+        - task_key: bronze_ingestion
+          max_retries: 0
+          timeout_seconds: 3600
+          spark_python_task:
+            # Root script so `pipelines` imports resolve as workspace files.
+            python_file: ${workspace.file_path}/scripts/run_bronze_job.py
+            source: WORKSPACE
+            parameters:
+              - "--batch-id={{job.parameters.batch_id}}"
+              - "--arrival-date={{job.parameters.arrival_date}}"
+              - "--landing-root={{job.parameters.landing_root}}"
