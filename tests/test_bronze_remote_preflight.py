@@ -15,6 +15,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Mapping
 
 from pipelines.bronze.layout import LandingLayout, join_landing_uri, landing_relative_path
 from pipelines.bronze.manifest import ManifestPreflightError
@@ -185,6 +186,45 @@ class FakeBinarySpark:
         real transfer guarantee: the guarded pass must never add a URI here
         when its row was filtered out by the length guard)."""
         return list(self._content_collected)
+
+
+class SparkConnectRow:
+    """Test double for a serverless Spark Connect `Row`.
+
+    Mimics the exact shape from the reported cloud failure: index access
+    works, `asDict(recursive=True)` works, but `dict(row)` fails (the Row
+    iterates tuple-like over bare values) and `.get` is absent.
+    """
+
+    def __init__(self, values: dict):
+        self._values = dict(values)
+
+    def __getitem__(self, key):
+        return self._values[key]
+
+    def __iter__(self):
+        # Tuple-like Row iteration (bare values): `dict(row)` then fails with
+        # the reported "cannot convert dictionary update sequence element #0
+        # to a sequence" TypeError, exactly like the Spark Connect run.
+        return iter(self._values.values())
+
+    def asDict(self, recursive: bool = False):
+        if recursive:
+            return {key: dict(value) if isinstance(value, Mapping) else value
+                    for key, value in self._values.items()}
+        return dict(self._values)
+
+
+class SparkConnectRowsSpark(FakeBinarySpark):
+    """FakeBinarySpark whose collect() returns Spark Connect-style rows."""
+
+    @property
+    def read(self):
+        class ConnectReader(FakeReader):
+            def collect(self):
+                return [SparkConnectRow(row) for row in super().collect()]
+
+        return ConnectReader(self)
 
 
 def canonical_remote_objects(ready_bytes: bytes | None = None) -> tuple[str, dict[str, bytes]]:
@@ -659,6 +699,61 @@ class RemotePreflightContract(unittest.TestCase):
 
         with self.assertRaises(AssertionError):
             read_binary_object(AlarmSpark({}), "abfss://fs@host/x")
+
+    # --- Regression: serverless Spark Connect Row shape ---------------------
+
+    def test_spark_connect_row_double_matches_reported_failure_shape(self):
+        # The double reproduces the exact cloud failure surface: index access
+        # and asDict work, dict(row) raises the reported TypeError, .get is
+        # absent.
+        row = SparkConnectRow({"length": 3, "content": b"abc"})
+        self.assertEqual(row["length"], 3)
+        self.assertEqual(row.asDict(recursive=True)["content"], b"abc")
+        self.assertEqual(row.asDict()["content"], b"abc")
+        with self.assertRaises(TypeError) as caught:
+            dict(row)
+        self.assertIn("cannot convert dictionary update sequence element #0",
+                      str(caught.exception))
+        with self.assertRaises(AttributeError):
+            row.get("content")  # .get absent, like the Spark Connect Row
+
+    def test_read_binary_object_supports_spark_connect_rows(self):
+        payload = b"connect-row-payload"
+        spark = SparkConnectRowsSpark({"abfss://fs@host/connect": payload})
+        self.assertEqual(read_binary_object(spark, "abfss://fs@host/connect"), payload)
+        # The guarded content pass ran to completion on the normalized row.
+        self.assertEqual(spark.content_collected, ["abfss://fs@host/connect"])
+
+    def test_full_remote_preflight_supports_spark_connect_rows(self):
+        # Object reads AND metadata-only directory listings both return
+        # Spark Connect-style rows; the preflight must succeed end to end
+        # (proves the guarded content read and the listing normalization).
+        spark = SparkConnectRowsSpark(canonical_remote_objects()[1])
+        result = remote_preflight(spark, landing_root=ROOT_URI, batch_id=BATCH,
+                                  arrival_date=ARRIVAL)
+        self.assertEqual([r.source for r in result.receipts],
+                         ["orders", "customers", "products"])
+        self.assertEqual(result.total_rows, 44)
+        self.assertEqual(len(spark.listings), 3)
+
+    def test_unsupported_row_object_is_rejected_with_clear_error(self):
+        class BogusRow:
+            """No asDict, not a mapping: unsupported by the normalization."""
+
+        class BogusRowsSpark(FakeBinarySpark):
+            @property
+            def read(self):
+                class BogusReader(FakeReader):
+                    def collect(self):
+                        return [BogusRow()]
+
+                return BogusReader(self)
+
+        spark = BogusRowsSpark({"abfss://fs@host/bogus": b"x"})
+        with self.assertRaises(RemotePreflightError) as caught:
+            read_binary_object(spark, "abfss://fs@host/bogus")
+        self.assertIn("unsupported row object", str(caught.exception))
+        self.assertIn("BogusRow", str(caught.exception))
 
 
 if __name__ == "__main__":

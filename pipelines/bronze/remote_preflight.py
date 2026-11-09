@@ -65,6 +65,39 @@ class RemotePreflightError(ValueError):
     """Cualquier desviación del preflight remoto aborta el Job: nada se escribe."""
 
 
+def _row_to_dict(row) -> dict:
+    """Normalize one collected row into a plain driver-side dict.
+
+    Collected rows are not guaranteed to be plain mappings: on serverless
+    Spark Connect, a `Row` supports index access and `asDict(recursive=True)`
+    but `dict(row)` fails (`TypeError: cannot convert dictionary update
+    sequence element #0 to a sequence`) and `.get` is absent. Standard Rows
+    (via `asDict(recursive=True)`) and plain mappings (fakes/test doubles)
+    are both supported here; any other row object is rejected loudly with
+    `RemotePreflightError` instead of crashing mid-read.
+    """
+    if isinstance(row, Mapping):
+        return dict(row)
+    as_dict = getattr(row, "asDict", None)
+    if callable(as_dict):
+        try:
+            try:
+                normalized = as_dict(recursive=True)
+            except TypeError:
+                normalized = as_dict()
+        except TypeError as exc:
+            normalized = None
+            raise RemotePreflightError(
+                "binaryFile read returned an unsupported row object: its asDict "
+                f"is not usable ({exc}); expected a Spark Row with "
+                f"asDict(recursive=True) or a mapping, got {type(row).__name__}") from exc
+        if isinstance(normalized, Mapping):
+            return dict(normalized)
+    raise RemotePreflightError(
+        "binaryFile read returned an unsupported row object: expected a Spark "
+        f"Row with asDict(recursive=True) or a mapping, got {type(row).__name__}")
+
+
 @dataclass(frozen=True)
 class RemotePreflightResult:
     batch_id: str
@@ -150,7 +183,8 @@ def read_binary_object(spark, uri: str, *, max_bytes: int = MAX_OBJECT_BYTES) ->
             f"object changed between reads at {uri}: first read reported "
             f"{length} bytes, diagnostic length-only read reports {diagnostic}; "
             "changed objects are not accepted and no content was transferred.")
-    verified_length = rows[0]["length"]
+    guarded_row = _row_to_dict(rows[0])
+    verified_length = guarded_row["length"]
     if verified_length != length:
         # Guarded read raced with a mutation that still fits the limit: catch
         # it here and refuse to accept/use the content.
@@ -158,7 +192,7 @@ def read_binary_object(spark, uri: str, *, max_bytes: int = MAX_OBJECT_BYTES) ->
             f"object changed between reads at {uri}: first pass reported "
             f"{length} bytes, guarded pass reports {verified_length}; "
             "changed objects are not accepted and content is not used.")
-    content = rows[0].get("content")
+    content = guarded_row.get("content")
     if content is None:
         raise RemotePreflightError(f"binaryFile returned no content for {uri}")
     if len(content) != verified_length:
@@ -173,7 +207,7 @@ def _collect_first_row(spark, uri: str, select: tuple[str, ...]) -> dict:
     rows = dataframe.collect()
     if len(rows) != 1:
         raise RemotePreflightError(f"no object found at {uri}")
-    return dict(rows[0])
+    return _row_to_dict(rows[0])
 
 
 def list_batch_directory(spark, directory_uri: str,
@@ -211,7 +245,13 @@ def list_batch_directory(spark, directory_uri: str,
                .select("_metadata.file_path").limit(max_entries))
     paths = []
     for row in listing.collect():
-        path = row.get("_metadata.file_path")
+        normalized = _row_to_dict(row)
+        path = normalized.get("_metadata.file_path")
+        if path is None and isinstance(normalized.get("_metadata"), Mapping):
+            # Nested metadata shape: asDict(recursive=True) may surface the
+            # struct as {"_metadata": {"file_path": ...}} instead of the flat
+            # column name, so accept both shapes.
+            path = normalized["_metadata"].get("file_path")
         if not isinstance(path, str) or not path:
             raise RemotePreflightError(
                 f"directory listing of {directory_uri} returned a non-path entry")
