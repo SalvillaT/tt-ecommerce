@@ -4,12 +4,27 @@ from __future__ import annotations
 
 from .contracts import AUDIT_COLUMNS, BRONZE_CONTRACTS, SourceContract
 from .ddl import RUN_LOG_SQL_TYPES, bootstrap_bronze_tables
-from .layout import LandingLayout, join_landing_uri, landing_relative_path
+from .layout import (
+    LandingLayout,
+    join_landing_uri,
+    landing_relative_path,
+    validate_source_filename,
+)
 from .manifest import SourceReceipt
 from .run_log import RunMetrics
 
 
-def autoloader_options(contract: SourceContract, layout: LandingLayout, batch_id: str) -> dict[str, str]:
+def autoloader_options(contract: SourceContract, layout: LandingLayout, batch_id: str,
+                       filename: str | None = None) -> dict[str, str]:
+    """Auto Loader options for one contract.
+
+    When the exact approved filename is provided, `pathGlobFilter` is fixed to
+    it: the stream reads the batch DIRECTORY (`.load(directory_uri)` is kept —
+    never an individual file URI) but only objects whose exact approved
+    filename matches can be ingested, so nothing outside the receipt can enter
+    Bronze through this stream. The validated name is glob-literal safe
+    (`layout.validate_source_filename`).
+    """
     options = {
         "cloudFiles.format": contract.cloud_format,
         "cloudFiles.schemaLocation": layout.schema_location(contract.source),
@@ -23,6 +38,8 @@ def autoloader_options(contract: SourceContract, layout: LandingLayout, batch_id
         "cloudFiles.maxFilesPerTrigger": "100",
         "checkpointLocation": layout.checkpoint(contract.source, batch_id),
     }
+    if filename is not None:
+        options.update({"pathGlobFilter": validate_source_filename(filename)})
     if contract.cloud_format == "csv":
         options.update({"header": "true", "sep": ",", "encoding": "UTF-8"})
     return options
@@ -38,10 +55,16 @@ def _spark_schema(contract: SourceContract):
                        StructField("_corrupt_record", StringType(), True)])
 
 
-def source_reader(spark, source: str, batch_id: str, layout: LandingLayout):
-    """Return a configured reader; callers start it only after manifest preflight."""
+def source_reader(spark, source: str, batch_id: str, layout: LandingLayout,
+                  filename: str | None = None):
+    """Return a configured reader; callers start it only after manifest preflight.
+
+    With a validated exact `filename`, the Auto Loader is bound to it via
+    `pathGlobFilter` (defense in depth: even if the landing directory were
+    mutated after preflight, this stream cannot ingest other names).
+    """
     contract = BRONZE_CONTRACTS[source]
-    options = autoloader_options(contract, layout, batch_id)
+    options = autoloader_options(contract, layout, batch_id, filename=filename)
     reader = spark.readStream.format("cloudFiles").schema(_spark_schema(contract))
     for key, value in options.items():
         if key != "checkpointLocation":
@@ -65,14 +88,17 @@ def resolve_batch_input_uri(layout: LandingLayout, source: str, batch_id: str,
 
 
 def source_stream(spark, source: str, batch_id: str, arrival_date: str, layout: LandingLayout,
-                  landing_root: str | None = None):
+                  landing_root: str | None = None, filename: str | None = None):
     """Configured stream over one approved batch directory, never a source root.
 
     When the Job passes an explicit `landing_root`, the Auto Loader reads the
-    physical final URI for this batch (inside the already granted external
-    locations); the relative `landing/...` logical path is never used there.
+    physical final directory for this batch (inside the already granted
+    external locations); the relative `landing/...` logical path is never used
+    there. The read location is ALWAYS the batch directory (`.load()` keeps a
+    directory URI, never an individual file URI): with a validated exact
+    `filename`, `pathGlobFilter` constrains ingestion to that exact name.
     """
-    reader, options = source_reader(spark, source, batch_id, layout)
+    reader, options = source_reader(spark, source, batch_id, layout, filename=filename)
     return reader.load(resolve_batch_input_uri(layout, source, batch_id, arrival_date, landing_root)), options
 
 
@@ -134,22 +160,43 @@ def append_run_log(spark, metrics: RunMetrics) -> None:
     dataframe.write.format("delta").mode("append").saveAsTable("tt_ecommerce_synthetic.bronze.ingestion_run_log")
 
 
+def validate_receipt_filename(receipt: SourceReceipt) -> str:
+    """Ensure the receipt filename is THE contract's exact approved name.
+
+    The receipt comes from the remote preflight; this is the last guard that
+    binds the runtime stream to the approved filename before any read is
+    started (pure and cheap, safe to call before bootstrap).
+    """
+    if not isinstance(receipt, SourceReceipt):
+        raise TypeError("receipt must be a validated SourceReceipt")
+    contract = BRONZE_CONTRACTS[receipt.source]
+    expected = contract.filename(receipt.batch_id)
+    if receipt.filename != expected:
+        raise ValueError(
+            f"receipt filename {receipt.filename!r} is not the approved contract "
+            f"filename {expected!r} for source '{receipt.source}'")
+    return validate_source_filename(receipt.filename)
+
+
 def execute_source_receipt(spark, receipt: SourceReceipt, *, arrival_date: str,
                            pipeline_run_id: str, layout: LandingLayout | None = None,
                            landing_root: str | None = None):
     """Start one availableNow managed-table stream for an already validated receipt.
 
     This composes only a per-batch input directory (physical URI when
-    `landing_root` is provided). Remote manifest/ready-marker validation must
-    have completed before invocation. It makes no cross-table atomicity claim;
-    retained checkpoint semantics are described separately.
+    `landing_root` is provided), loaded as a DIRECTORY and constrained to the
+    receipt's exact approved filename via `pathGlobFilter`. Remote
+    manifest/ready-marker validation (including the exact-one-file directory
+    audit) must have completed before invocation. It makes no cross-table
+    atomicity claim; retained checkpoint semantics are described separately.
     """
     if not isinstance(receipt, SourceReceipt):
         raise TypeError("receipt must be a validated SourceReceipt")
     layout = layout or LandingLayout()
+    filename = validate_receipt_filename(receipt)
     contract = BRONZE_CONTRACTS[receipt.source]
     stream, options = source_stream(spark, receipt.source, receipt.batch_id, arrival_date, layout,
-                                    landing_root=landing_root)
+                                    landing_root=landing_root, filename=filename)
     enriched = add_provenance(
         stream, batch_id=receipt.batch_id, pipeline_run_id=pipeline_run_id,
         receipt_sha256=receipt.sha256,

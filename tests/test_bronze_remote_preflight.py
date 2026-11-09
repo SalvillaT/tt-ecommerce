@@ -43,11 +43,19 @@ class FakeReader:
     def __init__(self, spark):
         self._spark = spark
         self._filter_expression: str | None = None
+        self._current = None
+        self._listing: list[str] | None = None
+        self._limit: int | None = None
+        self._pending_options: dict = {}
 
     def format(self, name):
         self._spark.formats.append(name)
         if name != "binaryFile":
             raise AssertionError(f"preflight must use binaryFile, got {name}")
+        return self
+
+    def option(self, key, value):
+        self._pending_options[key] = value
         return self
 
     def load(self, uri):
@@ -60,7 +68,32 @@ class FakeReader:
             spark._mutate_between_passes(uri, spark.objects)
         spark.uris.append(uri)
         self._current = spark.objects.get(uri)  # None -> missing object
+        self._listing = None
+        self._limit = None
+        spark.reader_options.append((uri, dict(self._pending_options)))
+        self._pending_options = {}
+        if self._current is None:
+            # Directory listing pass (metadata-only): the fake mirrors the
+            # Spark semantics the option contract relies on. WITHOUT the
+            # explicit `recursiveFileLookup` option the directory read is
+            # NON-recursive (only direct children); WITH it, keys under
+            # nested subdirectories surface, exactly like the guaranteed
+            # recursive listing the preflight audit requires.
+            recursive = self._recursive_file_lookup
+            prefix = uri.rstrip("/") + "/"
+            if recursive:
+                keys = [key for key in spark.objects if key.startswith(prefix)]
+            else:
+                keys = [key for key in spark.objects
+                        if key.startswith(prefix) and "/" not in key[len(prefix):]]
+            self._listing = sorted(keys)
+            spark.listing_uris.append(uri)
         return self
+
+    @property
+    def _recursive_file_lookup(self) -> bool:
+        value = self._spark.reader_options[-1][1].get("recursiveFileLookup")
+        return value in (True, "true", "True", 1, "1")
 
     def filter(self, expression):
         self._filter_expression = expression
@@ -74,13 +107,26 @@ class FakeReader:
             self._spark.filtered_projects.append((uri, self._filter_expression, columns))
         self._spark.selected_projects.append((uri, columns))
         if set(columns) - {"length", "content"}:
-            raise AssertionError(f"unexpected binaryFile projection: {columns}")
+            if set(columns) != {"_metadata.file_path"}:
+                raise AssertionError(f"unexpected binaryFile projection: {columns}")
         return self
 
     def limit(self, count):
+        self._limit = count
         return self
 
     def collect(self):
+        if self._listing is not None:
+            # Metadata-only directory listing pass: driver receives ONLY path
+            # strings of the listed entries (after the applied limit bound).
+            uri = self._spark.uris[-1]
+            entries = self._listing if self._limit is None else self._listing[:self._limit]
+            self._spark.listings.append((uri, tuple(entries)))
+            projection = set(self._spark.selected_projects[-1][1])
+            rows = [{key: value for key, value in
+                     {"_metadata.file_path": path}.items() if key in projection}
+                    for path in entries]
+            return rows
         if self._current is None:
             return []
         uri = self._spark.uris[-1]
@@ -110,9 +156,12 @@ class FakeBinarySpark:
         self.objects = objects
         self.formats: list[str] = []
         self.uris: list[str] = []
+        self.listing_uris: list[str] = []  # directory listing loads (metadata-only)
+        self.reader_options: list[tuple[str, dict]] = []  # (uri, options set before a load)
         self.selected_projects: list[tuple[str, tuple]] = []
         self.filtered_projects: list[tuple[str, str, tuple]] = []
         self.filters: list[tuple[str, str]] = []
+        self.listings: list[tuple[str, tuple]] = []  # (directory_uri, collected paths)
         self.guarded_out: list[tuple[str, str]] = []
         self._read_history: dict[str, list] = {}
         self._hook_fired: set[str] = set()
@@ -138,24 +187,33 @@ class FakeBinarySpark:
         return list(self._content_collected)
 
 
+def canonical_remote_objects(ready_bytes: bytes | None = None) -> tuple[str, dict[str, bytes]]:
+    """The approved promoted batch as fake binaryFile objects under ROOT_URI.
+
+    Module-level so other suites (e.g. the entrypoint integration tests) can
+    reuse the exact same fixture without instantiating the TestCase.
+    """
+    manifest_sha = hashlib.sha256((FIXTURE / f"manifest_{BATCH}.json").read_bytes()).hexdigest()
+    ready = ready_bytes if ready_bytes is not None else _canonical_ready_bytes(manifest_sha, include_sha=True)
+    objects = {
+        LandingLayout().ready_uri(ROOT_URI, BATCH): ready,
+        LandingLayout().manifest_uri(ROOT_URI, BATCH): (FIXTURE / f"manifest_{BATCH}.json").read_bytes(),
+    }
+    layout = LandingLayout()
+    for source, filename in (("orders", "orders_DEMO-001.jsonl"),
+                             ("customers", "customers_DEMO-001.csv"),
+                             ("products", "products_DEMO-001.csv")):
+        uri = layout.final_file_uri(source, BATCH, ARRIVAL, ROOT_URI)
+        objects[uri] = (FIXTURE / filename).read_bytes()
+    return manifest_sha, objects
+
+
 class RemotePreflightContract(unittest.TestCase):
     def _remote_bytes(self, ready_bytes: bytes | None = None) -> dict[str, bytes]:
-        manifest_sha = hashlib.sha256((FIXTURE / f"manifest_{BATCH}.json").read_bytes()).hexdigest()
-        ready = ready_bytes if ready_bytes is not None else _canonical_ready_bytes(manifest_sha, include_sha=True)
-        objects = {
-            LandingLayout().ready_uri(ROOT_URI, BATCH): ready,
-            LandingLayout().manifest_uri(ROOT_URI, BATCH): (FIXTURE / f"manifest_{BATCH}.json").read_bytes(),
-        }
-        layout = LandingLayout()
-        for source, filename in (("orders", "orders_DEMO-001.jsonl"),
-                                 ("customers", "customers_DEMO-001.csv"),
-                                 ("products", "products_DEMO-001.csv")):
-            uri = layout.final_file_uri(source, BATCH, ARRIVAL, ROOT_URI)
-            objects[uri] = (FIXTURE / filename).read_bytes()
-        return manifest_sha, objects
+        return canonical_remote_objects(ready_bytes)[1]
 
     def _preflight(self, mutate=None, *, spark=None, batch=BATCH, arrival=ARRIVAL, ready_bytes=None):
-        _, objects = self._remote_bytes(ready_bytes=ready_bytes)
+        objects = self._remote_bytes(ready_bytes=ready_bytes)
         if mutate is not None:
             objects = mutate(objects)
         fake_spark = spark or FakeBinarySpark(objects)
@@ -179,12 +237,20 @@ class RemotePreflightContract(unittest.TestCase):
         for uri in requested:
             self.assertNotIn("_staging", uri)
             self.assertTrue(uri.startswith(ROOT_URI))
-        self.assertEqual(len(set(fake_spark.uris)), 5)
-        self.assertEqual(len(fake_spark.uris), 10)  # two reads per object: length → length+content
+        self.assertEqual(len(set(fake_spark.uris)), 8)  # 5 objects + 3 batch directories
+        self.assertEqual(len(fake_spark.uris), 13)  # 2 object reads each + 1 directory listing per source
         # Per-batch canonical grain, never a source root.
         orders_uri = expected_final["orders"]
         self.assertIn(f"arrival_date={ARRIVAL}", orders_uri)
         self.assertIn(f"batch_id={BATCH}", orders_uri)
+        # Exactly one metadata-only listing per source, over the batch dir,
+        # and every returned entry is exactly the approved file.
+        file_by_dir = {}
+        for source in ("orders", "customers", "products"):
+            file_by_dir[layout.final_directory_uri(source, BATCH, ARRIVAL, ROOT_URI)] = (
+                layout.final_file_uri(source, BATCH, ARRIVAL, ROOT_URI))
+        self.assertEqual(dict(fake_spark.listings),
+                         {dir_uri: (file_uri,) for dir_uri, file_uri in file_by_dir.items()})
 
     def test_logical_paths_preserved_separately_from_physical_uri(self):
         layout = LandingLayout()
@@ -326,22 +392,81 @@ class RemotePreflightContract(unittest.TestCase):
 
     def test_length_read_precedes_content_read(self):
         result_spark = self._preflight()[1]
-        # Each canonical object is read exactly twice: length first, then a
-        # GUARDED length+content pass only after the limit check.
-        requests: dict[str, list] = {}
+        # Each canonical OBJECT is read exactly twice: length first, then a
+        # GUARDED length+content pass only after the limit check. Directory
+        # audits are separate metadata-only (path-only) listing passes.
+        object_requests: dict[str, list] = {}
+        listing_requests: dict[str, list] = {}
         for uri, columns in result_spark.selected_projects:
-            requests.setdefault(uri, []).append(columns)
-        self.assertEqual(len(requests), 5)
-        for uri, projections in requests.items():
+            if columns == ("_metadata.file_path",):
+                listing_requests.setdefault(uri, []).append(columns)
+            else:
+                object_requests.setdefault(uri, []).append(columns)
+        self.assertEqual(len(object_requests), 5)
+        for uri, projections in object_requests.items():
             self.assertEqual(projections, [("length",), ("length", "content")])
         # The guarded pass applies the length filter BEFORE the projection,
         # so a mutation between passes cannot transfer content to the driver.
         self.assertEqual(len(result_spark.filters), 5)
         for uri, expression in result_spark.filters:
             self.assertEqual(expression, f"length <= {MAX_OBJECT_BYTES}")
+        # The directory audits never request content or any other column.
+        self.assertEqual(len(listing_requests), 3)
+        for uri, projections in listing_requests.items():
+            self.assertEqual(projections, [("_metadata.file_path",)])
+
+    def test_directory_listing_requires_explicit_recursive_file_lookup(self):
+        # The audit's listing pass MUST explicitly set recursiveFileLookup:
+        # without it the binaryFile directory read is not guaranteed to
+        # descend into nested subdirectories, and an extra file under one
+        # could vanish from the listing and pass the exact-one audit. The
+        # metadata-only, never-content property still holds: only paths are
+        # requested, and the guarded object reads set no options.
+        _, fake_spark = self._preflight()
+        listing_uris = set(fake_spark.listing_uris)
+        self.assertEqual(len(listing_uris), 3)
+        options_by_uri = dict(fake_spark.reader_options)
+        for uri in listing_uris:
+            self.assertEqual(options_by_uri[uri], {"recursiveFileLookup": True})
+        for uri in set(fake_spark.uris) - listing_uris:
+            self.assertEqual(options_by_uri[uri], {})
+        self.assertEqual(len(fake_spark.reader_options), len(fake_spark.uris))
+
+    def test_nested_subdirectory_listing_depends_on_the_option(self):
+        # The fake mirrors Spark's semantics: without recursiveFileLookup the
+        # directory read lists only direct children, so the nested copy of
+        # the SAME approved filename would be invisible. Probes that the
+        # option is load-bearing for this rejection (a listing missing the
+        # option keeps the single direct-child entry and the preflight
+        # proceeds into the byte audits, hitting the concept drift the fix
+        # exists to close).
+        def boot(objects):
+            directory = LandingLayout().final_directory_uri("products", BATCH, ARRIVAL, ROOT_URI)
+            nested_name = objects[
+                LandingLayout().final_file_uri("products", BATCH, ARRIVAL, ROOT_URI)
+            ]
+            objects[f"{directory}/nested/{'products_' + BATCH + '.csv'}"] = nested_name
+            return objects
+
+        objects = canonical_remote_objects()[1]
+        spark = FakeBinarySpark(boot(objects))
+        directory = LandingLayout().final_directory_uri("products", BATCH, ARRIVAL, ROOT_URI)
+        # Simulate the regression: the same listing read WITHOUT the option
+        # must NOT see the nested entry (non-recursive semantics).
+        listing = FakeBinarySpark(boot(canonical_remote_objects()[1]))
+        reader = listing.read.format("binaryFile").load(directory)
+        paths = [row["_metadata.file_path"]
+                 for row in reader.select("_metadata.file_path").limit(8).collect()]
+        self.assertNotIn(
+            f"{directory}/nested/products_{BATCH}.csv", paths)
+        # The real preflight (with the option) DOES surface and reject it.
+        with self.assertRaises(RemotePreflightError) as caught:
+            remote_preflight(spark, landing_root=ROOT_URI, batch_id=BATCH, arrival_date=ARRIVAL)
+        self.assertIn("nested subdirectories", str(caught.exception))
+        self.assertIn("/nested/", str(caught.exception))
 
     def test_object_mutating_between_passes_is_rejected_without_content(self):
-        _, objects = self._remote_bytes()
+        objects = self._remote_bytes()
         orders_uri = LandingLayout().final_file_uri("orders", BATCH, ARRIVAL, ROOT_URI)
 
         def mutate_to_oversized(uri, objects):
@@ -363,7 +488,7 @@ class RemotePreflightContract(unittest.TestCase):
         # produces a different second-pass length; the guarded pass must
         # re-verify it against the first try pass and reject WITHOUT using
         # or accepting the content (no downstream audit, no later sources).
-        _, objects = self._remote_bytes()
+        objects = self._remote_bytes()
         orders_uri = LandingLayout().final_file_uri("orders", BATCH, ARRIVAL, ROOT_URI)
         first_length = len(objects[orders_uri])
         assert first_length + 5 <= MAX_OBJECT_BYTES
@@ -387,7 +512,7 @@ class RemotePreflightContract(unittest.TestCase):
         self.assertNotIn(orders_uri, spark.guarded_out)  # row passed the size guard
 
     def test_object_vanishing_between_passes_rejected_differently(self):
-        _, objects = self._remote_bytes()
+        objects = self._remote_bytes()
         orders_uri = LandingLayout().final_file_uri("orders", BATCH, ARRIVAL, ROOT_URI)
 
         def delete_between_passes(uri, objects):
@@ -401,6 +526,89 @@ class RemotePreflightContract(unittest.TestCase):
         self.assertIn("vanished between reads", str(caught.exception))
         self.assertNotIn(orders_uri, spark.content_collected)
         self.assertNotIn("changed between reads", str(caught.exception))
+
+    def test_extra_file_in_batch_directory_is_rejected_before_content(self):
+        def mutate(objects):
+            directory = LandingLayout().final_directory_uri("orders", BATCH, ARRIVAL, ROOT_URI)
+            objects[f"{directory}/unexpected_file.csv"] = b"stray"
+            return objects
+
+        objects = self._remote_bytes()
+        spark = FakeBinarySpark(mutate(objects))
+        orders_uri = LandingLayout().final_file_uri("orders", BATCH, ARRIVAL, ROOT_URI)
+        orders_dir = LandingLayout().final_directory_uri("orders", BATCH, ARRIVAL, ROOT_URI)
+        with self.assertRaises(RemotePreflightError) as caught:
+            remote_preflight(spark, landing_root=ROOT_URI, batch_id=BATCH, arrival_date=ARRIVAL)
+        self.assertIn("unexpected entries", str(caught.exception))
+        self.assertIn("extra files or nested subdirectories", str(caught.exception))
+        # The audit runs BEFORE the approved file bytes are read: rejection
+        # happens at the listing pass and no content ever reached the driver.
+        self.assertEqual(spark.uris[-1], orders_dir)
+        self.assertNotIn(orders_uri, spark.content_collected)
+
+    def test_nested_subdirectory_entry_is_rejected(self):
+        def mutate(objects):
+            directory = LandingLayout().final_directory_uri("products", BATCH, ARRIVAL, ROOT_URI)
+            objects[f"{directory}/nested/sub/products_{BATCH}.csv"] = (
+                objects[LandingLayout().final_file_uri("products", BATCH, ARRIVAL, ROOT_URI)])
+            return objects
+
+        objects = self._remote_bytes()
+        spark = FakeBinarySpark(mutate(objects))
+        product_dir = LandingLayout().final_directory_uri("products", BATCH, ARRIVAL, ROOT_URI)
+        with self.assertRaises(RemotePreflightError) as caught:
+            remote_preflight(spark, landing_root=ROOT_URI, batch_id=BATCH, arrival_date=ARRIVAL)
+        self.assertIn("nested subdirectories", str(caught.exception))
+        # The unexpected nested path is named in the rejection.
+        self.assertIn("/nested/sub/", str(caught.exception))
+        self.assertEqual(spark.uris[-1], product_dir)
+
+    def test_exactly_one_approved_file_directory_passes(self):
+        # The listing must be satisfied by exactly the canonical entry: pin
+        # the single-entry equality of every per-source listing explicitly.
+        result, fake_spark = self._preflight()
+        self.assertEqual(len(result.receipts), 3)
+        self.assertTrue(all(len(entries) == 1 for _, entries in fake_spark.listings))
+
+    def test_non_root_landing_root_rejected_before_any_read(self):
+        invalid_roots = [
+            f"{ROOT_URI}/orders",                                       # subpath / traversal surface
+            f"abfss://landing@example.dfs.core.windows.net/orders/..",  # traversal attempt
+            f"{ROOT_URI}?query=1",                                      # query
+            f"{ROOT_URI}#fragment",                                     # fragment
+            "abfss://landing@example.dfs.core.windows.net:443",         # port
+            "wasbs://landing@example.blob.core.windows.net",            # other scheme/endpoint
+            "abfs://landing@example.dfs.core.windows.net",
+            "https://example.dfs.core.windows.net/landing",
+            "s3://landing@bucket",
+            "file:///landing",                                          # local root filesystem
+            "/dbfs/landing",                                            # DBFS root filesystem
+            "landing",                                                  # logical path, not a URI
+            "abfss://example.dfs.core.windows.net",                     # account rootless container
+            "abfss://data@example.dfs.core.windows.net",                # another container
+            "abfss://LANDING@example.dfs.core.windows.net",             # container must be exact
+        ]
+        for root in invalid_roots:
+            with self.subTest(root=root):
+                objects = self._remote_bytes()
+                spark = FakeBinarySpark(objects)
+                with self.assertRaises(RemotePreflightError) as caught:
+                    remote_preflight(spark, landing_root=root, batch_id=BATCH,
+                                     arrival_date=ARRIVAL)
+                self.assertEqual(spark.uris, [])
+                self.assertFalse(spark.content_collected)
+
+    def test_trailing_slash_root_is_normalized(self):
+        objects = self._remote_bytes()
+        spark = FakeBinarySpark(objects)
+        result = remote_preflight(spark, landing_root=ROOT_URI + "/", batch_id=BATCH,
+                                  arrival_date=ARRIVAL)
+        self.assertEqual(result.landing_root, ROOT_URI)
+        self.assertEqual(result.ready_uri, LandingLayout().ready_uri(ROOT_URI, BATCH))
+        self.assertEqual(result.source_uris,
+                         {source: LandingLayout().final_file_uri(
+                             source, BATCH, ARRIVAL, ROOT_URI)
+                          for source in ("orders", "customers", "products")})
 
     def test_ready_marker_without_manifest_hash_is_rejected(self):
         ready = _canonical_ready_bytes("", include_sha=False)

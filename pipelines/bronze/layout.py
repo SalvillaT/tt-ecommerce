@@ -11,9 +11,58 @@ from .contracts import BRONZE_CONTRACTS
 
 BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 ARRIVAL_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Contract-internal exact file names only (glob metacharacters are excluded so
+# a validated name is also a safe exact `pathGlobFilter` pattern).
+SOURCE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 LANDING_PREFIX = "landing/"
 
 LANDING_SCHEME_PREFIX = "abfss://"
+
+# The operational landing root is a DEPLOYMENT configuration value, not a
+# run-editable parameter: exactly the ROOT of the `landing` container, with a
+# free-form (never secret) account. Anything beyond a pure container root —
+# subpath, query, fragment, port, other scheme/endpoint, another container, or
+# the account root without the container — is invalid by construction, so no
+# traversal surface exists at the root level either.
+LANDING_ROOT_RE = re.compile(
+    r"^abfss://landing@"
+    r"(?P<account>[a-z0-9][a-z0-9-]{1,21}[a-z0-9])"  # storage account: 3-24 lowercase alnum/hyphen
+    r"\.dfs\.core\.windows\.net/?"                    # exactly the DFS endpoint (+ optional slash)
+)
+
+
+def validate_landing_root(landing_root: str) -> str:
+    """Strictly validate the operational landing root as a `landing` container root.
+
+    Accepts ONLY `abfss://landing@<account>.dfs.core.windows.net` (optionally
+    with a single trailing slash, which is normalized off). Rejects a subpath,
+    query, fragment or port, other schemes/endpoints (wasbs/abfs/https/s3...),
+    a local/DBFS root filesystem, another container name, an empty value, and
+    therefore any traversal attempt at the root level. The account is not
+    matched against a configured truth (no real account is presumed here);
+    this validator enforces the structural landing contract only.
+    """
+    if not isinstance(landing_root, str):
+        raise ValueError("landing_root must be a string abfss:// URI")
+    stripped = landing_root.strip()
+    if not stripped:
+        raise ValueError("landing_root is required")
+    if not LANDING_ROOT_RE.fullmatch(stripped):
+        raise ValueError(
+            "landing_root must be exactly the abfss://landing@<account>.dfs.core.windows.net "
+            "container root (no subpath, query, fragment, port, another container or scheme)")
+    return stripped.rstrip("/")
+
+
+def validate_source_filename(filename: str) -> str:
+    """Validate an exact contract file name, safe to use as a path glob filter.
+
+    Accepted names contain no `/`, `..`, backslash or glob metacharacter, so
+    the value is both an exact name and a literal-only `pathGlobFilter`.
+    """
+    if not isinstance(filename, str) or not SOURCE_FILENAME_RE.fullmatch(filename):
+        raise ValueError("source filename must be a safe exact contract file name")
+    return filename
 
 
 def validate_batch_id(batch_id: str) -> str:
@@ -100,6 +149,10 @@ class LandingLayout:
 
     def final_file_uri(self, source: str, batch_id: str, arrival_date: str, landing_root: str) -> str:
         return self.landing_uri(landing_root, self.final_file(source, batch_id, arrival_date))
+
+    def final_directory_uri(self, source: str, batch_id: str, arrival_date: str, landing_root: str) -> str:
+        """Physical per-batch source directory (the Auto Loader read root)."""
+        return self.landing_uri(landing_root, self.final_directory(source, batch_id, arrival_date))
 
 
 def landing_relative_path(logical: str) -> str:

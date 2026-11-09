@@ -245,13 +245,26 @@ resource "databricks_grant" "engineer_writer_catalog" {
   depends_on = [terraform_data.unity_catalog_gate]
 }
 
-resource "databricks_grant" "engineer_writer_schema" {
-  for_each = databricks_schema.phase1
+# Phase 2 write-ownership split: the Phase 2 run-as service principal owns all
+# Bronze writes (CREATE_TABLE granted by databricks_grant.phase2_job_bronze_schema),
+# so engineer_writer keeps CREATE_TABLE on silver/quarantine/gold only and never
+# on bronze. USE_SCHEMA is unchanged on every Phase 1 schema.
+locals {
+  engineer_writer_schema_privileges = {
+    bronze     = ["USE_SCHEMA"]
+    silver     = ["USE_SCHEMA", "CREATE_TABLE"]
+    quarantine = ["USE_SCHEMA", "CREATE_TABLE"]
+    gold       = ["USE_SCHEMA", "CREATE_TABLE"]
+  }
+}
 
-  schema = each.value.id
+resource "databricks_grant" "engineer_writer_schema" {
+  for_each = local.engineer_writer_schema_privileges
+
+  schema = databricks_schema.phase1[each.key].id
 
   principal  = var.engineer_writer_group_name
-  privileges = ["USE_SCHEMA", "CREATE_TABLE"]
+  privileges = each.value
 
   depends_on = [terraform_data.unity_catalog_gate]
 }

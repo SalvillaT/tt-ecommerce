@@ -12,16 +12,16 @@ resources:
       name: tt-ecommerce-bronze-synthetic-ingestion
       max_concurrent_runs: 1
 
-      # Event-driven parameters only; the operator supplies values per run
-      # (GF2-6 upload + GF2-7 compute authorization). Defaults stay empty:
-      # the entrypoint refuses to run without all three values.
+      # Event-driven parameters ONLY (batch/date): the operator supplies values
+      # per run (GF2-6 upload + GF2-7 compute authorization). Defaults stay
+      # empty: the entrypoint refuses to run without them. `landing_root` is
+      # deliberately NOT a run-editable parameter: it is deployment
+      # configuration fixed by the bundle variable (see task parameters).
       parameters:
         - name: batch_id
           default: ""
         - name: arrival_date
           default: ""
-        - name: landing_root
-          default: ${var.landing_root}
 
       run_as:
         service_principal_name: ${var.run_as_service_principal_name}
@@ -37,4 +37,6 @@ resources:
             parameters:
               - "--batch-id={{job.parameters.batch_id}}"
               - "--arrival-date={{job.parameters.arrival_date}}"
-              - "--landing-root={{job.parameters.landing_root}}"
+              # Fixed deployment argument from the bundle variable (validated
+              # by the entrypoint as the exact landing container root).
+              - "--landing-root=${var.landing_root}"

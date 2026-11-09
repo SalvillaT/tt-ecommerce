@@ -9,6 +9,15 @@ concedidas: `landing/orders`, `landing/customers`, `landing/products` y
 * las tres rutas finales canónicas del lote (grano por
   `arrival_date`/`batch_id`), nunca el root de una fuente ni `_staging`.
 
+Además, por fuente, un LISTADO metadata-only del directorio exacto del lote
+(`.select("_metadata.file_path")`, nunca `content`): el directorio debe
+contener EXACTAMENTE el archivo aprobado; cualquier archivo extra o
+subdirectorio anidado rechaza el lote antes de leer bytes, y por tanto antes
+de cualquier DDL/stream del Job. La `landing_root` se valida estrictamente
+como raíz del contenedor `landing` (sin subruta/query/fragment/puerto; slash
+final normalizable; ver `layout.validate_landing_root`) y un root inválido
+rechaza el lote antes de ninguna lectura.
+
 Verifica ready + nombres + SHA-256 + recuentos/total contra los bytes
 originales, reutilizando los validadores puros de `manifest.py`. Sin `dbutils`,
 sin secretos: el root físico se construye con el join seguro de `layout.py`.
@@ -25,7 +34,12 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from .contracts import BRONZE_CONTRACTS
-from .layout import LandingLayout, validate_arrival_date, validate_batch_id
+from .layout import (
+    LandingLayout,
+    validate_arrival_date,
+    validate_batch_id,
+    validate_landing_root,
+)
 from .manifest import (
     ManifestPreflightError,
     READY_MARKER_MANIFEST_KEY,
@@ -38,6 +52,11 @@ from .manifest import (
 )
 
 MAX_OBJECT_BYTES = 1_000_000  # ~1 MiB: los objetos del lote son pequeños y controlados.
+# Driver bound for the metadata-only directory listing pass: the approved
+# batch directory must hold EXACTLY one entry, so anything near this limit is
+# already an unexpected-directory rejection (the bound protects the driver,
+# the exact-one rule is the real contract).
+MAX_DIRECTORY_ENTRIES = 8
 BINARY_FILE_FORMAT = "binaryFile"
 READY_MANIFEST_SHA_KEY = "manifest_sha256"
 
@@ -157,6 +176,76 @@ def _collect_first_row(spark, uri: str, select: tuple[str, ...]) -> dict:
     return dict(rows[0])
 
 
+def list_batch_directory(spark, directory_uri: str,
+                         *, max_entries: int = MAX_DIRECTORY_ENTRIES) -> tuple[str, ...]:
+    """Metadata-only listing of one batch source directory.
+
+    Contract: `spark.read.format("binaryFile").option("recursiveFileLookup", True)
+    .load(directory).select("_metadata.file_path").limit(max_entries)`.
+    `content` is never requested, so no directory entry can push bytes to the
+    driver through this pass, regardless of its size; the driver receives only
+    path strings. The read is over the exact per-batch directory (never a
+    source root, never `_staging`).
+
+    `recursiveFileLookup=True` is REQUIRED, not optional: without it the
+    binaryFile directory read is not guaranteed to descend into nested
+    subdirectories, so an extra file under one could vanish from the listing
+    and slip past the exact-one audit. The explicit option makes the
+    enumeration recursive by contract, so sibling files AND files inside
+    subdirectories appear in the returned paths and are caught by
+    `audit_source_directory` (the audit therefore detects a nested
+    subdirectory that repeats the SAME approved filename too).
+
+    Exact residual limit: Azure listings surface files, not empty leaf
+    directories; a nested directory without files is not enumerated here.
+    Such a leaf cannot contribute data either (the runtime stream is bound to
+    the exact approved filename, see `spark.py`, and the preflight only reads
+    exact URIs), and any directory WITH files is caught by
+    `audit_source_directory`.
+    """
+    if not isinstance(max_entries, int) or isinstance(max_entries, bool) or max_entries <= 0:
+        raise RemotePreflightError("max_entries must be a positive integer bound")
+    listing = (spark.read.format(BINARY_FILE_FORMAT)
+               .option("recursiveFileLookup", True)
+               .load(directory_uri)
+               .select("_metadata.file_path").limit(max_entries))
+    paths = []
+    for row in listing.collect():
+        path = row.get("_metadata.file_path")
+        if not isinstance(path, str) or not path:
+            raise RemotePreflightError(
+                f"directory listing of {directory_uri} returned a non-path entry")
+        paths.append(path)
+    return tuple(paths)
+
+
+def audit_source_directory(spark, *, source: str, directory_uri: str, expected_file_uri: str,
+                           max_entries: int = MAX_DIRECTORY_ENTRIES) -> None:
+    """Reject a batch whose source directory is not exactly the approved file.
+
+    Public admission gate matching the local `validate_source_directory`
+    invariant (`Nothing-else-in-directory`) for the remote landing: the
+    listing (explicit `recursiveFileLookup=True`, metadata-only, never
+    `content`) must contain EXACTLY the canonical final URI. Any additional
+    entry — a sibling extra file or a file under a nested subdirectory,
+    including one that repeats the SAME approved filename — rejects the batch.
+    Runs before the batch bytes are read and therefore before any DDL/stream
+    in the job's driving order.
+    """
+    paths = list_batch_directory(spark, directory_uri, max_entries=max_entries)
+    expected_leaf = expected_file_uri.rstrip("/").rsplit("/", 1)[-1]
+    if not paths:
+        raise RemotePreflightError(
+            f"batch directory listing for source '{source}' at {directory_uri} found no entries: "
+            f"the approved file {expected_leaf} is missing")
+    extra = sorted(path for path in paths if path != expected_file_uri)
+    if extra:
+        raise RemotePreflightError(
+            f"batch directory listing for source '{source}' at {directory_uri} holds unexpected "
+            f"entries {extra}: extra files or nested subdirectories are rejected before DDL and "
+            f"streams; the approved directory must contain exactly {expected_leaf}")
+
+
 def remote_preflight(spark, *, landing_root: str, batch_id: str, arrival_date: str,
                      layout: LandingLayout | None = None,
                      max_bytes: int = MAX_OBJECT_BYTES) -> RemotePreflightResult:
@@ -172,14 +261,15 @@ def remote_preflight(spark, *, landing_root: str, batch_id: str, arrival_date: s
     detail preserved as its cause/message.
 
     Reads are limited to ready + control manifest + the three final URIs
-    composed by the layout under the granted landing sublocations; `_staging`
-    and source roots are unreachable by construction.
+    composed by the layout under the granted landing sublocations, plus one
+    metadata-only (path-only) listing per batch source directory enforcing the
+    exact-one-file directory contract; `_staging` and source roots are
+    unreachable by construction. The landing root must validate as exactly the
+    `landing` container root before any read occurs.
     """
     batch_id = validate_batch_id(batch_id)
     arrival_date = validate_arrival_date(arrival_date)
     layout = layout or LandingLayout()
-    if max_bytes <= 0 or not isinstance(max_bytes, int) or isinstance(max_bytes, bool):
-        raise RemotePreflightError("max_bytes must be a positive integer limit")
     try:
         return _preflight_bytes(spark, landing_root=landing_root, batch_id=batch_id,
                                 arrival_date=arrival_date, layout=layout, max_bytes=max_bytes)
@@ -191,6 +281,11 @@ def remote_preflight(spark, *, landing_root: str, batch_id: str, arrival_date: s
 
 def _preflight_bytes(spark, *, landing_root: str, batch_id: str, arrival_date: str,
                      layout: LandingLayout, max_bytes: int) -> RemotePreflightResult:
+    # Deployment configuration, strictly re-validated here: an invalid root
+    # rejects the batch before ANY remote read (no Spark action occurs).
+    landing_root = validate_landing_root(landing_root)
+    if max_bytes <= 0 or not isinstance(max_bytes, int) or isinstance(max_bytes, bool):
+        raise RemotePreflightError("max_bytes must be a positive integer limit")
     ready_uri = layout.ready_uri(landing_root, batch_id)
     ready_payload = parse_cloud_ready_payload(
         read_binary_object(spark, ready_uri, max_bytes=max_bytes),
@@ -211,7 +306,14 @@ def _preflight_bytes(spark, *, landing_root: str, batch_id: str, arrival_date: s
     source_uris: dict[str, str] = {}
     by_name = {item["file"]: item for item in manifest["files"]}
     for source, filename in expected.items():
+        directory_uri = layout.final_directory_uri(source, batch_id, arrival_date, landing_root)
         uri = layout.final_file_uri(source, batch_id, arrival_date, landing_root)
+        # 1) Directory exactness first: extra files or nested subdirectory
+        #    entries reject the batch BEFORE its bytes are read (and before
+        #    any DDL/stream in the job's driving order).
+        audit_source_directory(spark, source=source, directory_uri=directory_uri,
+                               expected_file_uri=uri)
+        # 2) Then the guarded byte read (SHA-256 + rows) of the approved file.
         raw = read_binary_object(spark, uri, max_bytes=max_bytes)
         receipts.append(audit_source_bytes(by_name[filename], raw, source, manifest_batch))
         source_uris[source] = uri

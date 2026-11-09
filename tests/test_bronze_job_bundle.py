@@ -45,7 +45,12 @@ class BundleSecretHygieneTests(unittest.TestCase):
     def test_landing_root_variable_present_and_non_secret(self):
         self.assertIn("landing_root:", DATABRICKS_YML)
         self.assertIn("abfss://", DATABRICKS_YML)
-        self.assertIn("${var.landing_root}", JOB_YML)
+        # Deployment configuration, NOT a run-editable job parameter: the
+        # bundle variable reaches the task as a FIXED argument (never
+        # `{{job.parameters.landing_root}}`).
+        self.assertNotIn("name: landing_root", JOB_YML)
+        self.assertNotIn("{{job.parameters.landing_root}}", JOB_YML)
+        self.assertIn("--landing-root=${var.landing_root}", JOB_YML)
 
 
 class BronzeJobResourceTests(unittest.TestCase):
@@ -59,8 +64,11 @@ class BronzeJobResourceTests(unittest.TestCase):
         self.assertIn("max_retries: 0", JOB_YML)
 
     def test_job_parameters_declared(self):
-        for parameter in ("name: batch_id", "name: arrival_date", "name: landing_root"):
+        for parameter in ("name: batch_id", "name: arrival_date"):
             self.assertIn(parameter, JOB_YML)
+        # The landing root is deployment configuration: it must never appear
+        # as a run-editable job parameter.
+        self.assertNotIn("name: landing_root", JOB_YML)
 
     def test_python_root_script_wiring(self):
         self.assertIn("spark_python_task:", JOB_YML)
@@ -68,7 +76,10 @@ class BronzeJobResourceTests(unittest.TestCase):
         self.assertIn("source: WORKSPACE", JOB_YML)
         self.assertIn("--batch-id={{job.parameters.batch_id}}", JOB_YML)
         self.assertIn("--arrival-date={{job.parameters.arrival_date}}", JOB_YML)
-        self.assertIn("--landing-root={{job.parameters.landing_root}}", JOB_YML)
+        # The landing root is a FIXED deployment argument from the bundle
+        # variable, not a per-run parameter.
+        self.assertIn("--landing-root=${var.landing_root}", JOB_YML)
+        self.assertNotIn("{{job.parameters.landing_root}}", JOB_YML)
 
     def test_task_key_is_single(self):
         self.assertEqual(JOB_YML.count("task_key:"), 1)
@@ -81,8 +92,13 @@ class BundleTopologyTests(unittest.TestCase):
         self.assertIn("- resources/*.yml", DATABRICKS_YML)
 
     def test_sync_ships_only_runtime_code(self):
-        self.assertIn("- pipelines", DATABRICKS_YML)
-        self.assertIn("- scripts", DATABRICKS_YML)
+        self.assertIn("- pipelines/**", DATABRICKS_YML)
+        self.assertIn("- scripts/run_bronze_job.py", DATABRICKS_YML)
+        # Only the ONE root script the job executes is shipped: the operator
+        # scripts stay out of the bundle runtime, and so do the code maps.
+        self.assertNotIn("generate_synthetic", DATABRICKS_YML)
+        self.assertNotIn("promote_batch", DATABRICKS_YML)
+        self.assertIn("- pipelines/**/codemap.md", DATABRICKS_YML)
         for excluded in ("- tests/**", "- docs/**", "- data/**", "- infra/**"):
             self.assertIn(excluded, DATABRICKS_YML)
 

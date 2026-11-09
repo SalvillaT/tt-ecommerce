@@ -37,11 +37,16 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable
 
-from .layout import LandingLayout, validate_arrival_date, validate_batch_id
+from .layout import (
+    LandingLayout,
+    validate_arrival_date,
+    validate_batch_id,
+    validate_landing_root,
+)
 from .manifest import ManifestPreflightError
 from .remote_preflight import RemotePreflightError, RemotePreflightResult, remote_preflight
 from .run_log import RunLogEvent, RunMetrics
-from .spark import append_run_log, bootstrap_bronze_tables
+from .spark import append_run_log, bootstrap_bronze_tables, validate_receipt_filename
 
 
 def now_iso() -> str:
@@ -59,20 +64,26 @@ class BronzeJobConfig:
 
 
 def parse_job_args(argv: list[str] | None = None) -> BronzeJobConfig:
-    """Kept as thin wrapper over build_parser for CLI-compatibility tests."""
+    """Kept as thin wrapper over build_parser for CLI-compatibility tests.
+
+    `--landing-root` is NOT a run-editable job parameter: the bundle task
+    passes the bundle variable (deployment configuration) as a fixed
+    argument. It is still validated tightly here: exactly the `landing`
+    container root (`layout.validate_landing_root`), so no subpath/query/
+    fragment/port or traversal root can ever reach the job.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         batch_id = validate_batch_id(args.batch_id)
         arrival_date = validate_arrival_date(args.arrival_date)
+        landing_root = validate_landing_root(args.landing_root)
     except ValueError as exc:
         parser.exit(2, f"error: {exc}\n")
-    if not isinstance(args.landing_root, str) or not args.landing_root.strip():
-        parser.error("--landing-root is required (abfss://... of the approved landing root)")
     return BronzeJobConfig(
         batch_id=batch_id,
         arrival_date=arrival_date,
-        landing_root=args.landing_root.strip(),
+        landing_root=landing_root,
         pipeline_run_id=args.pipeline_run_id or uuid.uuid4().hex,
         attempt_id=args.attempt_id or uuid.uuid4().hex,
     )
@@ -86,7 +97,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-id", required=True, help="Identificador de lote (1-64 chars seguros).")
     parser.add_argument("--arrival-date", required=True, help="Fecha de llegada YYYY-MM-DD del lote.")
     parser.add_argument("--landing-root", required=True,
-                        help="URI física abfss:// de la raíz landing ya concedida (no secreta).")
+                        help="Fixed deployment config (bundle variable, not a run-editable "
+                             "parameter): exactly abfss://landing@<account>.dfs.core.windows.net.")
     parser.add_argument("--pipeline-run-id", default=None, help="ID de run del pipeline (opcional).")
     parser.add_argument("--attempt-id", default=None, help="ID de intento del run-log (opcional).")
     return parser
@@ -163,7 +175,8 @@ def execute_run(spark, config: BronzeJobConfig, *, layout: LandingLayout | None 
     `start_stream(spark, receipt, config, layout)`.
 
     Failure semantics (exact):
-      * A preflight failure raises without DDL or any run-log write.
+      * A preflight failure (or a preflight receipt not carrying the exact
+        contract filename) raises without DDL or any run-log write.
       * An error AFTER bootstrap (per-source stream, `await` or its
         `SOURCE_COMMITTED` write) attempts one best-effort `FAILED` event for
         that source and re-raises; nothing is cleaned or repaired.
@@ -185,6 +198,17 @@ def execute_run(spark, config: BronzeJobConfig, *, layout: LandingLayout | None 
         # Preflight failure: no tables/log precreation, no fake success log.
         raise RemotePreflightError(
             f"remote preflight failed for batch {config.batch_id}: {exc}") from exc
+
+    # Receipt binding BEFORE any write (still zero side effects): every
+    # preflight receipt must carry the exact contract filename for its source;
+    # the runtime stream is later bound to this exact name (pathGlobFilter).
+    for receipt in result.receipts:
+        try:
+            validate_receipt_filename(receipt)
+        except Exception as exc:
+            raise RemotePreflightError(
+                f"preflight produced a receipt that does not match the v1 contract "
+                f"for source '{receipt.source}': {exc}") from exc
 
     bootstrap(spark)
     records: list[dict] = []

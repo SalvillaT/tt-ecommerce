@@ -19,11 +19,25 @@ from pipelines.bronze.entrypoint import (
     parse_job_args,
     progress_input_rows,
 )
-from pipelines.bronze.layout import LandingLayout, join_landing_uri, landing_relative_path
+from pipelines.bronze.layout import (
+    LandingLayout,
+    join_landing_uri,
+    landing_relative_path,
+    validate_landing_root,
+)
 from pipelines.bronze.manifest import SourceReceipt
-from pipelines.bronze.remote_preflight import RemotePreflightError, RemotePreflightResult
+from pipelines.bronze.remote_preflight import (
+    RemotePreflightError,
+    RemotePreflightResult,
+    remote_preflight,
+)
 from pipelines.bronze.run_log import RunMetrics, RunLogEvent
 from pipelines.bronze.spark import resolve_batch_input_uri
+
+try:  # works both under `unittest discover -s tests` and `unittest tests.…`
+    from test_bronze_remote_preflight import FakeBinarySpark, canonical_remote_objects
+except ImportError:  # pragma: no cover - package-style invocation
+    from tests.test_bronze_remote_preflight import FakeBinarySpark, canonical_remote_objects
 
 BATCH = "DEMO-001"
 ARRIVAL = "2026-01-10"
@@ -155,6 +169,57 @@ class StreamingInputUriTests(unittest.TestCase):
     def test_unsafe_landing_root_rejected(self):
         with self.assertRaises(ValueError):
             resolve_batch_input_uri(LandingLayout(), "products", BATCH, ARRIVAL, "s3://bucket")
+
+
+class LandingRootValidationTests(unittest.TestCase):
+    """The landing root is DEPLOYMENT configuration, not a run-editable job
+    parameter. It is validated strictly in Python: exactly the root of the
+    `landing` abfss container — no subpath, query, fragment or port, no other
+    scheme/root filesystem, no traversable root. A trailing slash alone is
+    normalized. The account is free-form (never a secret, never presumed)."""
+
+    def _args(self, root):
+        return ["--batch-id", BATCH, "--arrival-date", ARRIVAL, "--landing-root", root]
+
+    def test_accepts_exact_container_root_and_normalizes_trailing_slash(self):
+        self.assertEqual(parse_job_args(self._args(ROOT_URI)).landing_root, ROOT_URI)
+        self.assertEqual(
+            parse_job_args(self._args(ROOT_URI + "/")).landing_root, ROOT_URI)
+        # Another valid account is structurally valid (no real account is
+        # presumed or hard-coded in the validator).
+        other = validate_landing_root("abfss://landing@other-account-storage.dfs.core.windows.net")
+        self.assertEqual(other, "abfss://landing@other-account-storage.dfs.core.windows.net")
+
+    def test_rejects_roots_that_are_not_landing_container_roots(self):
+        invalid_roots = [
+            None,
+            "",
+            "   ",
+            f"{ROOT_URI}/orders",                     # subpath (no traversal surface)
+            f"{ROOT_URI}/orders/..",                  # traversal attempt
+            f"{ROOT_URI}?query=1",                    # query
+            f"{ROOT_URI}#fragment",                   # fragment
+            "abfss://landing@example.dfs.core.windows.net:443",   # port
+            "wasbs://landing@example.blob.core.windows.net",      # other scheme/endpoint
+            "abfs://landing@example.dfs.core.windows.net",
+            "https://example.dfs.core.windows.net/landing",
+            "s3://landing@bucket",
+            "file:///landing",                        # local root filesystem
+            "/dbfs/landing",                          # DBFS root filesystem
+            "/mnt/landing",
+            "landing",                                # logical path, not a URI
+            "abfss://example.dfs.core.windows.net",   # account root, missing container
+            "abfss://data@example.dfs.core.windows.net",      # another container
+            "abfss://LANDING@example.dfs.core.windows.net",   # container name is exact
+            "abfss://landing//corners@example.dfs.core.windows.net",
+            "abfss://landing@example.dfs.core.windows.net//",
+        ]
+        for root in invalid_roots:
+            with self.subTest(root=root):
+                self.assertRaises(ValueError, validate_landing_root, root)
+                if isinstance(root, str):
+                    with self.assertRaises(SystemExit):
+                        parse_job_args(self._args(root))
 
 
 class BronzeJobConfigTests(unittest.TestCase):
@@ -307,6 +372,22 @@ class ExecuteRunTests(unittest.TestCase):
         self.assertEqual(spark.ddls, [])
         self.assertEqual(spark.run_log_writes, [])
 
+    def test_receipt_not_matching_contract_filename_rejected_before_ddl(self):
+        # A preflight receipt must carry THE exact contract filename; the
+        # forged/traversal one is rejected before any DDL or run-log write.
+        receipts = _receipts()
+        forged = SourceReceipt(BATCH, "orders", f"../{BATCH}/orders_{BATCH}.jsonl",
+                               "a" * 64, 26, "v1")
+        spark = RecordingSpark()
+        preflight = RecordingPreflight(_result(receipts=[forged, *receipts[1:]]))
+        with self.assertRaises(RemotePreflightError) as caught:
+            execute_run(spark, self._config(), preflight=preflight,
+                        start_stream=RecordingStreams({}))
+        self.assertIn("orders", str(caught.exception))
+        self.assertEqual(spark.ddls, [])
+        self.assertEqual(spark.tables, [])
+        self.assertEqual(spark.run_log_writes, [])
+
     def test_failure_after_bootstrap_writes_failed_and_propagates(self):
         spark = RecordingSpark()
         preflight = RecordingPreflight()
@@ -366,6 +447,101 @@ class ExecuteRunTests(unittest.TestCase):
         self.assertEqual(spark.tables, [])
 
 
+class BinaryPreflightAndEventSpark(RecordingSpark, FakeBinarySpark):
+    """One fake playing both remote roles: the binaryFile edge consumed by the
+    REAL `remote_preflight` (read chain) AND the bootstrap DDL / run-log sink
+    consumed by `execute_run` (`sql` / `createDataFrame`)."""
+
+    def __init__(self, objects):
+        RecordingSpark.__init__(self)
+        FakeBinarySpark.__init__(self, objects)
+
+
+class PreflightDirectoryAuditIntegrationTests(unittest.TestCase):
+    """Local integration between the REAL remote preflight and `execute_run`.
+
+    A promoted batch whose exact source directory holds an unexpected entry
+    (a sibling extra file, or a NESTED subdirectory repeating the SAME
+    approved filename) must abort in `execute_run` with zero DDL, zero
+    run-log writes and zero streams started — and no byte of the unexpected
+    entry or of the approved batch file may ever reach the driver.
+    """
+
+    def _config(self):
+        return BronzeJobConfig(batch_id=BATCH, arrival_date=ARRIVAL, landing_root=ROOT_URI,
+                               pipeline_run_id="run-1", attempt_id="attempt-1")
+
+    def _rejected_run(self, mutate):
+        _, objects = canonical_remote_objects()
+        spark = BinaryPreflightAndEventSpark(mutate(objects))
+        streams = RecordingStreams({})
+        with self.assertRaises(RemotePreflightError) as caught:
+            execute_run(spark, self._config(), preflight=remote_preflight,
+                        start_stream=streams)
+        return spark, streams, caught
+
+    def _assert_zero_side_effects(self, spark, streams, source):
+        message = self._last_message
+        # Zero DDL: nothing is precreated for a rejected batch.
+        self.assertEqual(spark.ddls, [])
+        self.assertEqual(spark.tables, [])
+        # Zero run-log: not even STARTED/MANIFEST_VALIDATED is written.
+        self.assertEqual(spark.run_log_writes, [])
+        # Zero streams: not a single source stream started.
+        self.assertEqual(streams.started, [])
+        # And the audit pass really ran with the explicit recursive option.
+        self.assertTrue(any(options.get("recursiveFileLookup") is True
+                            for _, options in spark.reader_options),
+                        msg=f"directory audit must set recursiveFileLookup for {source}")
+
+    def test_nested_subdirectory_with_approved_filename_aborts_with_zero_writes(self):
+        layout = LandingLayout()
+        orders_file = layout.final_file_uri("orders", BATCH, ARRIVAL, ROOT_URI)
+        orders_dir = layout.final_directory_uri("orders", BATCH, ARRIVAL, ROOT_URI)
+        nested_same_name = f"{orders_dir}/nested/{orders_file.rsplit('/', 1)[-1]}"
+
+        def mutate(objects):
+            objects[nested_same_name] = objects[orders_file]
+            return objects
+
+        spark, streams, caught = self._rejected_run(mutate)
+        message = str(caught.exception)
+        self._last_message = message
+        self.assertIn("remote preflight failed", message)
+        self.assertIn("nested subdirectories", message)
+        self.assertIn("/nested/", message)
+        self._assert_zero_side_effects(spark, streams, "orders")
+        # The listing pass over the orders directory surfaced BOTH entries;
+        # it ran with recursiveFileLookup=True and no content was ever
+        # collected for the approved file or the nested copy.
+        self.assertTrue(
+            all(options.get("recursiveFileLookup") is True
+                for uri, options in spark.reader_options if uri == orders_dir))
+        self.assertNotIn(orders_file, spark.content_collected)
+        self.assertNotIn(nested_same_name,
+                         [uri for uri, columns in spark.selected_projects
+                          if "content" in columns])
+        self.assertEqual(spark.uris[-1], orders_dir)
+
+    def test_sibling_extra_file_aborts_with_zero_writes(self):
+        layout = LandingLayout()
+        customers_file = layout.final_file_uri("customers", BATCH, ARRIVAL, ROOT_URI)
+        customers_dir = layout.final_directory_uri("customers", BATCH, ARRIVAL, ROOT_URI)
+
+        def mutate(objects):
+            objects[f"{customers_dir}/unexpected_file.csv"] = b"stray"
+            return objects
+
+        spark, streams, caught = self._rejected_run(mutate)
+        message = str(caught.exception)
+        self._last_message = message
+        self.assertIn("remote preflight failed", message)
+        self.assertIn("unexpected entries", message)
+        self._assert_zero_side_effects(spark, streams, "customers")
+        self.assertNotIn(customers_file, spark.content_collected)
+        self.assertEqual(spark.uris[-1], customers_dir)
+
+
 class StreamingFakeSpark:
     """Fake edge for the REAL `default_start_stream` adapter.
 
@@ -382,6 +558,7 @@ class StreamingFakeSpark:
         self.loaded_uris: list[str] = []
         self.stream_tables: list[str] = []
         self.stream_option_sets: list[set] = []
+        self.stream_option_values: list[dict] = []
         self.trigger_flags: list[dict] = []
         self.added_columns: list[tuple[str, object]] = []
         self.queries: list[FakeQuery] = []
@@ -459,6 +636,7 @@ class FakeStreamDF:
     def writeStream(self):
         pending = getattr(self._spark, "_pending_options", {})
         self._spark.stream_option_sets.append(set(pending.keys()))
+        self._spark.stream_option_values.append(dict(pending))
         self._spark._pending_options = {}
         return FakeStreamWriter(self._spark)
 
@@ -619,6 +797,16 @@ class RealAdapterTests(unittest.TestCase):
             f"{ROOT_URI}/customers/arrival_date={ARRIVAL}/batch_id={BATCH}",
             f"{ROOT_URI}/products/arrival_date={ARRIVAL}/batch_id={BATCH}",
         ])
+        # The Auto Loader loads the batch DIRECTORY (never an individual file
+        # URI) and is bound to the receipt's EXACT approved filename.
+        for loaded_uri in real_spark.loaded_uris:
+            self.assertTrue(loaded_uri.endswith(f"batch_id={BATCH}"))
+            self.assertNotIn(f"/orders_{BATCH}.jsonl", loaded_uri)
+            self.assertNotIn(".csv", loaded_uri)
+        for value_set, source in zip(real_spark.stream_option_values,
+                                     ["orders", "customers", "products"]):
+            extension = "jsonl" if source == "orders" else "csv"
+            self.assertEqual(value_set["pathGlobFilter"], f"{source}_{BATCH}.{extension}")
         # Append-only sink on managed tables with real checkpoint wiring.
         self.assertEqual(real_spark.stream_tables,
                          ["tt_ecommerce_synthetic.bronze.orders_raw",

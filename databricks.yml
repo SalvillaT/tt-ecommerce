@@ -15,16 +15,22 @@ include:
   - resources/*.yml
 
 # Only ship what the job executes: the pipelines package and its root script.
-# Tests, docs, infra and data fixtures are never synchronized.
+# Tests, docs, infra, data fixtures and the operator scripts are never
+# synchronized. The landing root is deployment configuration (bundle variable
+# passed as a fixed task argument), never a run-editable job parameter.
 sync:
   include:
-    - pipelines
-    - scripts
+    # Runtime only: the pipelines package and the ONE root script the job
+    # executes (the operator scripts live outside the job runtime).
+    - pipelines/**
+    - scripts/run_bronze_job.py
   exclude:
+    - pipelines/**/codemap.md
     - tests/**
     - docs/**
     - data/**
     - infra/**
+    - scripts/**/codemap.md
     - .slim/**
 
 variables:
@@ -37,10 +43,14 @@ variables:
     default: ""
   landing_root:
     description: >-
-      Non-secret abfss:// root of the landing filesystem used by the job
-      (inside the granted external locations: landing/orders, customers,
-      products and _control; never _staging). Example:
+      Fixed DEPLOYMENT configuration, not a run-editable parameter: non-secret
+      abfss:// root of the landing filesystem (inside the granted external
+      locations: landing/orders, customers, products and _control; never
+      _staging). Example:
       abfss://landing@<storage_account>.dfs.core.windows.net
+      The bundle passes it to the task as a FIXED argument
+      (`--landing-root=${var.landing_root}`); the entrypoint validates it
+      strictly as the exact container root (layout.validate_landing_root).
     default: ""
   environment_key:
     description: >-
