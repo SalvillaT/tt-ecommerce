@@ -37,6 +37,12 @@ resources:
             parameters:
               - "--batch-id={{job.parameters.batch_id}}"
               - "--arrival-date={{job.parameters.arrival_date}}"
+              # Internal bootstrap argument (source: WORKSPACE runs the script
+              # via exec without `__file__`): the synced workspace `files`
+              # root, resolvable only from the bundle, NOT a run-editable
+              # parameter and consumed/validated by run_bronze_job BEFORE the
+              # `pipelines` imports.
+              - "--pipelines-root=${workspace.file_path}"
               # Fixed deployment argument from the bundle variable (validated
               # by the entrypoint as the exact landing container root).
               - "--landing-root=${var.landing_root}"
