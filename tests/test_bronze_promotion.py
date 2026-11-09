@@ -68,14 +68,15 @@ class FakeLandingRunner:
 
     def run(self, argv) -> str:
         argv = [str(argument) for argument in argv]
-        if argv[0] != "az":
-            raise AzureCliError(f"only 'az' commands are expected, got {argv[0]!r}")
+        if argv[:2] != ["storage", "fs"]:
+            raise AzureCliError(
+                f"runner must receive bare 'storage fs' argv without leading 'az', got {argv[:2]!r}")
         for name, expected in (("--file-system", "landing"), ("--auth-mode", "login")):
             if self._flag(argv, name) != expected:
                 raise AzureCliError(f"command missing locked flag {name}={expected}")
         if not self._flag(argv, "--account-name"):
             raise AzureCliError("command missing --account-name")
-        resource, operation = argv[3], argv[4]
+        resource, operation = argv[2], argv[3]
         # ADLS Gen2 argument shape: directories select by --name, files by --path.
         if resource == "directory" and "--path" in argv:
             raise AzureCliError("directory commands must target with --name, not --path")
@@ -122,6 +123,27 @@ class FakeLandingRunner:
     def has_upload_for(self, fragment: str) -> bool:
         return any("upload" in argv and any(fragment in argument for argument in argv)
                    for argv in self.commands)
+
+
+class AzCliRunnerSimulation:
+    """Regression boundary for the real CLI runner.
+
+    Mirrors `AzCliRunner.run(argv)`, which builds the final process command as
+    `[executable, *argv]` (shell=False) — without ever invoking `az`. It
+    records that final command and delegates the bare argv to an inner fake
+    runner, so a LandingClient regression that adds a literal "az" prefix is
+    caught as `az az storage ...` in the recorded final command.
+    """
+
+    def __init__(self, inner: FakeLandingRunner, executable: str = "az"):
+        self.executable = executable
+        self.inner = inner
+        self.final_commands: list[list[str]] = []
+
+    def run(self, argv) -> str:
+        final = [self.executable, *(str(argument) for argument in argv)]
+        self.final_commands.append(list(final))
+        return self.inner.run(argv)
 
 
 def _publish(plan, runner, local_dir):
@@ -243,7 +265,7 @@ class PromotionPublishTests(unittest.TestCase):
         self.assertEqual(events[-1]["action"], "publish-ready")
         ready_rel = f"_control/ready/{BATCH}.json"
         self.assertIn(ready_rel, runner.files)
-        self.assertEqual(runner.commands[-1][4], "download")
+        self.assertEqual(runner.commands[-1][3], "download")
         self.assertEqual(runner.commands[-1][runner.commands[-1].index("--path") + 1], ready_rel)
         marker = json.loads(runner.files[ready_rel].decode("utf-8"))
         self.assertEqual(marker["batch_id"], BATCH)
@@ -293,7 +315,7 @@ class PromotionPublishTests(unittest.TestCase):
     def test_exists_command_error_is_error_not_absence(self):
         runner, plan = _publish_failure_case(
             self,
-            fail_when=lambda argv: argv[4] == "exists",
+            fail_when=lambda argv: argv[3] == "exists",
             expect=AzureCliError,
         )
         self.assertTrue(all("upload" not in argv and "download" not in argv
@@ -343,7 +365,8 @@ class PromotionPublishTests(unittest.TestCase):
         _publish(plan, runner, local_dir)
         self.assertTrue(runner.commands)
         for argv in runner.commands:
-            self.assertEqual(argv[:3], ["az", "storage", "fs"])
+            self.assertEqual(argv[:2], ["storage", "fs"])
+            self.assertNotEqual(argv[0], "az")
             self.assertIn("--account-name", argv)
             self.assertEqual(FakeLandingRunner._flag(argv, "--account-name"), ACCOUNT)
             self.assertIn("--file-system", argv)
@@ -367,6 +390,44 @@ class PromotionPublishTests(unittest.TestCase):
         for argv in runner.commands:
             self.assertIsInstance(argv, list)
 
+    def test_az_cli_runner_final_command_has_exactly_one_az_prefix(self):
+        """Regression for `az az storage ...`: the runner owns the executable
+        prefix, so LandingClient argv must reach it without any leading `az`
+        and the final built command must be `az storage fs ...` exactly."""
+        inner = FakeLandingRunner()
+        runner = AzCliRunnerSimulation(inner, executable="az")
+        temp = tempfile.mkdtemp(prefix="final-command-")
+        local_dir = _fixture_copy(Path(temp))
+        plan = build_promotion_plan(local_dir, BATCH, ARRIVAL)
+        client = LandingClient(ACCOUNT, runner)
+        publish_promotion(plan, client, local_batch_dir=local_dir)
+        self.assertTrue(runner.final_commands)
+        for final in runner.final_commands:
+            self.assertEqual(final[:3], ["az", "storage", "fs"])
+            self.assertEqual(final.count("az"), 1)
+            self.assertNotIn("az", final[3:])
+
+    def test_az_cli_runner_simulation_flags_match_production_runner(self):
+        """The simulated runner must behave like AzCliRunner: it prepends the
+        executable to whatever argv it receives, keeping shell=False shape
+        (a flat argv list) locked flag values intact."""
+        captured: list[list[str]] = []
+
+        class RecordingRunner:
+            def run(self, argv):
+                captured.append(["az", *argv])  # mirrors AzCliRunner.run
+                return json.dumps({"exists": False})
+
+        client = LandingClient(ACCOUNT, RecordingRunner())
+        client.file_exists(f"_control/ready/{BATCH}.json")
+        self.assertTrue(captured)
+        self.assertEqual(captured[0][:4], ["az", "storage", "fs", "file"])
+        argv = captured[0]
+        self.assertEqual(FakeLandingRunner._flag(argv, "--auth-mode"), "login")
+        self.assertEqual(FakeLandingRunner._flag(argv, "--file-system"), "landing")
+        self.assertEqual(FakeLandingRunner._flag(argv, "--account-name"), ACCOUNT)
+        self.assertNotIn("az", argv[1:])
+
     def test_adls_directory_commands_use_name_and_file_commands_use_path(self):
         runner = FakeLandingRunner()
         temp = tempfile.mkdtemp(prefix="arg-shape-")
@@ -375,7 +436,7 @@ class PromotionPublishTests(unittest.TestCase):
         _publish(plan, runner, local_dir)
         saw_directory = saw_file = False
         for argv in runner.commands:
-            resource = argv[3]
+            resource = argv[2]
             if resource == "directory":
                 saw_directory = True
                 self.assertIn("--name", argv)
@@ -394,7 +455,7 @@ class PromotionPublishTests(unittest.TestCase):
         local_dir = _fixture_copy(Path(temp))
         plan = build_promotion_plan(local_dir, BATCH, ARRIVAL)
         _publish(plan, runner, local_dir)
-        downloads = [argv for argv in runner.commands if argv[4] == "download"]
+        downloads = [argv for argv in runner.commands if argv[3] == "download"]
         self.assertTrue(downloads)
         for argv in downloads:
             self.assertIn("--overwrite", argv)
@@ -417,7 +478,7 @@ class PromotionPublishTests(unittest.TestCase):
         self.assertEqual(persisted["manifest_sha256"], plan.manifest_sha256)
         # Nothing is cleaned or overwritten afterwards: the failed upload is
         # the very last command recorded.
-        self.assertEqual(runner.commands[-1][4], "upload")
+        self.assertEqual(runner.commands[-1][3], "upload")
         last_path = runner.commands[-1][runner.commands[-1].index("--path") + 1]
         self.assertEqual(last_path, READY_REL)
 
@@ -436,7 +497,7 @@ class PromotionPublishTests(unittest.TestCase):
         persisted = json.loads(runner.files[READY_REL].decode("utf-8"))
         self.assertEqual(persisted["batch_id"], BATCH)
         self.assertEqual(persisted["manifest_sha256"], plan.manifest_sha256)
-        self.assertEqual(runner.commands[-1][4], "download")
+        self.assertEqual(runner.commands[-1][3], "download")
         self.assertEqual(runner.commands[-1][runner.commands[-1].index("--path") + 1], READY_REL)
         ready_uploads = sum(1 for argv in runner.commands
                             if "upload" in argv and any(READY_REL in argument for argument in argv))

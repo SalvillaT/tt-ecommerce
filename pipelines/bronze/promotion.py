@@ -126,31 +126,31 @@ class LandingClient:
 
     def directory_exists(self, relative_path: str) -> bool:
         output = self._runner.run(self._argv(
-            "az", "storage", "fs", "directory", "exists", "--name", relative_path,
+            "storage", "fs", "directory", "exists", "--name", relative_path,
         ))
         return self._parse_exists(output)
 
     def file_exists(self, relative_path: str) -> bool:
         output = self._runner.run(self._argv(
-            "az", "storage", "fs", "file", "exists", "--path", relative_path,
+            "storage", "fs", "file", "exists", "--path", relative_path,
         ))
         return self._parse_exists(output)
 
     def create_directory(self, relative_path: str) -> None:
         self._runner.run(self._argv(
-            "az", "storage", "fs", "directory", "create", "--name", relative_path,
+            "storage", "fs", "directory", "create", "--name", relative_path,
         ))
 
     def upload_file(self, local_path: Path, relative_path: str) -> None:
         self._runner.run(self._argv(
-            "az", "storage", "fs", "file", "upload",
+            "storage", "fs", "file", "upload",
             "--source", str(local_path), "--path", relative_path,
             "--overwrite", "false",
         ))
 
     def download_file(self, relative_path: str, destination: Path) -> Path:
         self._runner.run(self._argv(
-            "az", "storage", "fs", "file", "download",
+            "storage", "fs", "file", "download",
             "--path", relative_path, "--destination", str(destination),
             "--overwrite", "false",
         ))
