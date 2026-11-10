@@ -158,11 +158,18 @@ _FAKE_ENTRYPOINT = (
     "import sys\n"
     "\n"
     "PARSED_ARGV: list = []\n"
+    "EXECUTE_CALLS: list = []\n"
     "\n"
     "def parse_job_args(argv=None):\n"
     "    argv = list(sys.argv) if argv is None else argv\n"
     "    PARSED_ARGV[:] = argv\n"
     "    return \"parsed\"\n"
+    "\n"
+    "def get_default_spark():\n"
+    "    return \"fake-spark\"\n"
+    "\n"
+    "def execute_run(spark, config):\n"
+    "    EXECUTE_CALLS.append((spark, config))\n"
 )
 
 
@@ -186,7 +193,7 @@ class _WorkspaceExec:
     """
 
     def __init__(self) -> None:
-        self.namespace: dict = {}
+        self.namespace: dict = {"__name__": "workspace_exec"}
 
     def __enter__(self) -> "_WorkspaceExec":
         self._saved_path = list(sys.path)
@@ -204,7 +211,9 @@ class _WorkspaceExec:
     def set_argv(self, argv: list[str]) -> None:
         sys.argv[:] = argv
 
-    def run_script(self) -> dict:
+    def run_script(self, *, as_main: bool = False) -> dict:
+        if as_main:
+            self.namespace["__name__"] = "__main__"
         exec(self._compiled, self.namespace)  # noqa: S102 (intentional: workspace exec contract)
         return self.namespace
 
@@ -224,7 +233,7 @@ class _WorkspaceExec:
 class WorkspaceExecBootstrapBehaviorTests(unittest.TestCase):
     """The root script bootstraps from the explicit root, NEVER from `__file__`."""
 
-    def _workspace_root(self, *, with_pipelines: bool) -> Path:
+    def _workspace_root(self, *, with_pipelines: bool, entrypoint_source: str = _FAKE_ENTRYPOINT) -> Path:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name).resolve()
@@ -233,7 +242,7 @@ class WorkspaceExecBootstrapBehaviorTests(unittest.TestCase):
             for rel in ("pipelines/__init__.py", "pipelines/bronze/__init__.py"):
                 (root / rel).write_text("", encoding="utf-8")
             (root / "pipelines" / "bronze" / "entrypoint.py").write_text(
-                _FAKE_ENTRYPOINT, encoding="utf-8")
+                entrypoint_source, encoding="utf-8")
         return root
 
     def _job_args(self) -> list[str]:
@@ -287,6 +296,31 @@ class WorkspaceExecBootstrapBehaviorTests(unittest.TestCase):
             namespace = env.run_script()
             self.assertEqual(sys.argv, ["run_bronze_job", *job_args])
             self.assertEqual(namespace["parse_job_args"](), "parsed")
+
+    def test_workspace_main_success_returns_without_system_exit(self):
+        root = self._workspace_root(with_pipelines=True)
+        argv = ["run_bronze_job", f"--pipelines-root={root}", *self._job_args()]
+        with _WorkspaceExec() as env:
+            env.set_argv(argv)
+            # Databricks executes the workspace file as __main__.  A successful
+            # run must return naturally rather than raise SystemExit(0).
+            namespace = env.run_script(as_main=True)
+            entrypoint = sys.modules["pipelines.bronze.entrypoint"]
+            self.assertEqual(entrypoint.EXECUTE_CALLS, [("fake-spark", "parsed")])
+            self.assertEqual(namespace["__name__"], "__main__")
+
+    def test_workspace_main_run_errors_propagate(self):
+        failing_entrypoint = _FAKE_ENTRYPOINT.replace(
+            "    EXECUTE_CALLS.append((spark, config))\n",
+            "    EXECUTE_CALLS.append((spark, config))\n"
+            "    raise RuntimeError('simulated run failure')\n",
+        )
+        root = self._workspace_root(with_pipelines=True, entrypoint_source=failing_entrypoint)
+        argv = ["run_bronze_job", f"--pipelines-root={root}", *self._job_args()]
+        with _WorkspaceExec() as env:
+            env.set_argv(argv)
+            with self.assertRaisesRegex(RuntimeError, "simulated run failure"):
+                env.run_script(as_main=True)
 
     def test_missing_internal_root_fails_before_pipelines_import(self):
         # Even with a perfectly synced root, a direct (non-bundle) start must

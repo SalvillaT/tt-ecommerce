@@ -108,4 +108,8 @@ def run() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(run())
+    # Workspace-backed spark_python_task executes this script via IPython exec,
+    # where even SystemExit(0) is reported as a workload failure.  Returning
+    # naturally is still exit code 0 under a normal Python interpreter; an
+    # uncaught run failure continues to propagate and fail the task.
+    run()
