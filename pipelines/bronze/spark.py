@@ -147,14 +147,50 @@ def bronze_append_writer(dataframe, contract: SourceContract, options: dict[str,
             .trigger(availableNow=True).toTable(contract.table))
 
 
+def _run_log_schema():
+    """Return the explicit input schema for one run-log event.
+
+    ``RunMetrics.event_at`` is deliberately an RFC3339 string at this boundary;
+    the projection in :func:`append_run_log` performs the contract's TIMESTAMP
+    cast.  Every other input field uses its physical run-log SQL type, so a
+    legitimate nullable ``source`` or ``error_class`` cannot make Spark infer
+    ``NullType`` before that projection runs.
+    """
+    try:
+        from pyspark.sql.types import (  # lazy import keeps local modules importable
+            BooleanType,
+            LongType,
+            StringType,
+            StructField,
+            StructType,
+        )
+    except ImportError as exc:
+        raise RuntimeError("PySpark is required only to append run-log events") from exc
+
+    sql_type_factories = {
+        "STRING": StringType,
+        "BIGINT": LongType,
+        "BOOLEAN": BooleanType,
+    }
+    fields = []
+    for name, sql_type in RUN_LOG_SQL_TYPES.items():
+        # The input is RFC3339 text; selectExpr below owns the typed timestamp
+        # conversion to the managed-table contract.
+        data_type = StringType() if name == "event_at" else sql_type_factories[sql_type]()
+        fields.append(StructField(name, data_type, True))
+    return StructType(fields)
+
+
 def append_run_log(spark, metrics: RunMetrics) -> None:
     """Append one validated attempt/event; caller must bootstrap managed tables first."""
     if not isinstance(metrics, RunMetrics):
         raise TypeError("metrics must be RunMetrics")
     # Validation happens on construction and as_dict preserves the stable contract.
     payload = metrics.as_dict()
+    # Schema is supplied before inference: selectExpr is too late to repair a
+    # NullType inferred from a valid nullable STARTED event.
     # Explicit cast lets injected RFC3339 event_at become the typed table timestamp.
-    dataframe = spark.createDataFrame([payload]).selectExpr(*[
+    dataframe = spark.createDataFrame([payload], schema=_run_log_schema()).selectExpr(*[
         f"CAST(`{name}` AS {sql_type}) AS `{name}`" for name, sql_type in RUN_LOG_SQL_TYPES.items()
     ])
     dataframe.write.format("delta").mode("append").saveAsTable("tt_ecommerce_synthetic.bronze.ingestion_run_log")

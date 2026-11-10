@@ -12,6 +12,7 @@ import sys
 import unittest
 
 from pipelines.bronze.contracts import BRONZE_CONTRACTS
+from pipelines.bronze.ddl import RUN_LOG_SQL_TYPES
 from pipelines.bronze.entrypoint import (
     BronzeJobConfig,
     default_start_stream,
@@ -32,7 +33,7 @@ from pipelines.bronze.remote_preflight import (
     remote_preflight,
 )
 from pipelines.bronze.run_log import RunMetrics, RunLogEvent
-from pipelines.bronze.spark import resolve_batch_input_uri
+from pipelines.bronze.spark import append_run_log, resolve_batch_input_uri
 
 try:  # works both under `unittest discover -s tests` and `unittest tests.…`
     from test_bronze_remote_preflight import FakeBinarySpark, canonical_remote_objects
@@ -74,7 +75,7 @@ class RecordingSpark:
         self.ddls.append(ddl)
         return None
 
-    def createDataFrame(self, data):
+    def createDataFrame(self, data, schema=None):
         return FakeLogFrame(self, list(data))
 
     def record_write(self, rows, table):
@@ -88,6 +89,7 @@ class FakeLogFrame:
         self._rows = rows
 
     def selectExpr(self, *exprs):
+        self._spark.last_select_exprs = exprs
         return self
 
     @property
@@ -566,8 +568,8 @@ class StreamingFakeSpark:
     def sql(self, ddl):
         return self.event_sink.sql(ddl)
 
-    def createDataFrame(self, data):
-        return self.event_sink.createDataFrame(data)
+    def createDataFrame(self, data, schema=None):
+        return self.event_sink.createDataFrame(data, schema=schema)
 
     @property
     def run_log_writes(self):
@@ -726,9 +728,17 @@ def install_pyspark_stub():
     class StringType:
         pass
 
+    class LongType:
+        pass
+
+    class BooleanType:
+        pass
+
     types_mod.StructType = StructType
     types_mod.StructField = StructField
     types_mod.StringType = StringType
+    types_mod.LongType = LongType
+    types_mod.BooleanType = BooleanType
 
     class _Column:
         def __init__(self, label):
@@ -765,6 +775,57 @@ def install_pyspark_stub():
     return _StubRemove(added)
 
 
+_PYSPARK_STUB = None
+
+
+def setUpModule():
+    """Run local fake-Spark tests through the lazy PySpark schema boundary."""
+    global _PYSPARK_STUB
+    _PYSPARK_STUB = install_pyspark_stub()
+
+
+def tearDownModule():
+    if _PYSPARK_STUB is not None:
+        _PYSPARK_STUB.remove()
+
+
+class RunLogExplicitSchemaTests(unittest.TestCase):
+    def test_append_run_log_supplies_ordered_typed_schema_for_nullable_started_event(self):
+        class StrictSparkConnectLike(RecordingSpark):
+            def __init__(self):
+                super().__init__()
+                self.schema = None
+
+            def createDataFrame(self, data, schema=None):
+                if schema is None:
+                    raise AssertionError("Spark Connect rejects inferred schemas with null-only fields")
+                self.schema = schema
+                return super().createDataFrame(data, schema=schema)
+
+        spark = StrictSparkConnectLike()
+        append_run_log(spark, RunMetrics(
+            "attempt-1", "run-1", BATCH, None, RunLogEvent.STARTED,
+            "2026-01-01T00:00:00Z",
+        ))
+
+        self.assertEqual([field.name for field in spark.schema], list(RUN_LOG_SQL_TYPES))
+        self.assertTrue(all(field.nullable for field in spark.schema))
+        self.assertEqual(
+            [type(field.data_type).__name__ for field in spark.schema],
+            ["StringType", "StringType", "StringType", "StringType", "StringType", "StringType",
+             "StringType", "LongType", "LongType", "LongType", "LongType", "LongType", "LongType",
+             "LongType", "LongType", "LongType", "LongType", "StringType", "BooleanType"],
+        )
+        self.assertIsNone(spark.run_log_writes[0]["source"])
+        self.assertIsNone(spark.run_log_writes[0]["error_class"])
+        self.assertEqual(
+            spark.last_select_exprs,
+            tuple(f"CAST(`{name}` AS {sql_type}) AS `{name}`"
+                  for name, sql_type in RUN_LOG_SQL_TYPES.items()),
+        )
+        self.assertEqual(spark.tables, ["tt_ecommerce_synthetic.bronze.ingestion_run_log"])
+
+
 class RealAdapterTests(unittest.TestCase):
     """Pruela the true streaming seam: `execute_run` runs with the REAL
     `default_start_stream` adapter; only the Spark/Auto Loader edge is
@@ -772,11 +833,14 @@ class RealAdapterTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls._pyspark_stub = install_pyspark_stub()
+        # The module fixture already supplies the lazy-import stubs needed by
+        # every fake-Spark test.  Do not remove them before later test classes.
+        cls._pyspark_stub = None if _PYSPARK_STUB is not None else install_pyspark_stub()
 
     @classmethod
     def tearDownClass(cls):
-        cls._pyspark_stub.remove()
+        if cls._pyspark_stub is not None:
+            cls._pyspark_stub.remove()
 
     def _run_with_real_adapter(self):
         config = BronzeJobConfig(batch_id=BATCH, arrival_date=ARRIVAL,
