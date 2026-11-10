@@ -111,6 +111,29 @@ variable "phase2_job_run_as_application_id" {
   }
 }
 
+variable "enable_phase3_silver_foundation" {
+  description = "Phase 3 opt-in for the Silver/quarantine/gold job service principal foundation: catalog USE_CATALOG, Bronze USE_SCHEMA plus read-only SELECT on exactly the three raw tables, and USE_SCHEMA plus CREATE_TABLE on the silver, quarantine, and gold schemas. Defaults to false; no Phase 3 grants are created unless it and its approval are true. The identity is an existing, dedicated service principal separate from the Bronze Phase 2 run-as; this root only looks it up and never creates or manages Entra applications, service principals, secrets, or Azure RBAC. Operationally irreversible after apply: do not reset to false; retirement requires a reviewed dedicated code change."
+  type        = bool
+  default     = false
+}
+
+variable "phase3_silver_foundation_approved" {
+  description = "Phase 3 approval gate. Set true only after the dedicated Silver/quarantine/gold job service principal and its least-privilege grant model are approved; it has no effect unless enable_phase3_silver_foundation is true. Its plan/apply is a separate human authorization."
+  type        = bool
+  default     = false
+}
+
+variable "phase3_silver_job_run_as_application_id" {
+  description = "Nullable Entra application (client) ID of the existing, dedicated Databricks service principal for the future Phase 3 Silver/quarantine/gold job. It is separate from the Bronze Phase 2 run-as identity; this root only looks it up and never creates or manages Entra applications, service principals, secrets, or Azure RBAC. Required only when Phase 3 Silver foundation is enabled."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.phase3_silver_job_run_as_application_id == null || length(trimspace(var.phase3_silver_job_run_as_application_id)) > 0
+    error_message = "phase3_silver_job_run_as_application_id must be null or a non-empty Entra application ID."
+  }
+}
+
 variable "enable_sql_warehouse" {
   description = "Phase 5-only explicit cost opt-in. Creates a PRO 2X-Small SQL Warehouse only when true and phase5_sql_warehouse_approved is true."
   type        = bool

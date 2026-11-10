@@ -129,19 +129,33 @@ class BronzeCreateTableGrantExclusivityTests(unittest.TestCase):
     just the known blocks. Only the Phase 2 run-as service principal may hold
     CREATE_TABLE on bronze, and no other grant block (present or accidentally
     re-added later) may declare a literal CREATE_TABLE outside the writer
-    group's computed local map (silver/quarantine/gold)."""
+    group's computed local map (silver/quarantine/gold). The opt-in Phase 3
+    Silver foundation adds exactly one additional, read-only grant on the
+    bronze schema; it must never carry CREATE_TABLE."""
 
-    def test_the_run_as_grant_is_the_only_bronze_schema_grant(self):
+    def test_the_run_as_grant_is_the_only_bronze_schema_grant_with_create_table(self):
         bronze_schemas = [
             (header, body) for header, body in _grant_blocks()
             if re.search(
                 r'schema\s*=\s*databricks_schema\.phase1\["bronze"\]\.id', body)
         ]
-        self.assertEqual(len(bronze_schemas), 1, msg="unexpected extra grants on bronze")
-        header, body = bronze_schemas[0]
-        self.assertEqual(header, f'{RUN_AS_BRONZE_GRANT} {{')
+        run_as_blocks = [
+            block for block in bronze_schemas
+            if block[0] == f'{RUN_AS_BRONZE_GRANT} {{'
+        ]
+        self.assertEqual(len(run_as_blocks), 1,
+                         msg="the Phase 2 run-as bronze grant must appear exactly once")
+        _, body = run_as_blocks[0]
         self.assertIn(RUN_AS_PRINCIPAL, body)
         self.assertIn(USE_SCHEMA_PLUS_CREATE_TABLE, body)
+        # Every other bronze schema grant (the Phase 3 Silver foundation one,
+        # present or re-added later) is read-only: no CREATE_TABLE on bronze.
+        for header, other_body in bronze_schemas:
+            if header != f'{RUN_AS_BRONZE_GRANT} {{':
+                self.assertNotIn(
+                    "CREATE_TABLE", other_body,
+                    msg=f"grant {header!r} declares CREATE_TABLE on bronze; bronze "
+                        f"CREATE_TABLE is reserved for {RUN_AS_BRONZE_GRANT}")
 
     def test_the_run_as_grant_is_the_only_literal_create_table_grant(self):
         # The engineer_writer CREATE_TABLE lives ONLY in the computed local
