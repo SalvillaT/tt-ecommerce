@@ -20,10 +20,11 @@ include:
 # passed as a fixed task argument), never a run-editable job parameter.
 sync:
   include:
-    # Runtime only: the pipelines package and the ONE root script the job
-    # executes (the operator scripts live outside the job runtime).
+    # Runtime only: pipeline code plus the ingestion root and isolated,
+    # read-only DEMO-001 evidence verifier (operator scripts stay outside).
     - pipelines/**
     - scripts/run_bronze_job.py
+    - scripts/verify_bronze_demo_001.py
   exclude:
     - pipelines/**/codemap.md
     - tests/**
@@ -87,6 +88,14 @@ targets:
           tasks:
             - task_key: bronze_ingestion
               environment_key: ${var.environment_key}
+        bronze_demo_001_verification_job:
+          environments:
+            - environment_key: ${var.environment_key}
+              spec:
+                client: "1"
+          tasks:
+            - task_key: bronze_demo_001_verification
+              environment_key: ${var.environment_key}
 
   development_classic:
     mode: development
@@ -110,3 +119,15 @@ targets:
           tasks:
             - task_key: bronze_ingestion
               job_cluster_key: bronze_classic
+        bronze_demo_001_verification_job:
+          job_clusters:
+            - job_cluster_key: bronze_verification_classic
+              new_cluster:
+                spark_version: ${var.classic_spark_version}
+                node_type_id: ${var.classic_node_type_id}
+                num_workers: 1
+                data_security_mode: SINGLE_USER
+                autotermination_minutes: 15
+          tasks:
+            - task_key: bronze_demo_001_verification
+              job_cluster_key: bronze_verification_classic

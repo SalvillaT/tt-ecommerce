@@ -136,8 +136,9 @@ class BundleTopologyTests(unittest.TestCase):
     def test_sync_ships_only_runtime_code(self):
         self.assertIn("- pipelines/**", DATABRICKS_YML)
         self.assertIn("- scripts/run_bronze_job.py", DATABRICKS_YML)
-        # Only the ONE root script the job executes is shipped: the operator
-        # scripts stay out of the bundle runtime, and so do the code maps.
+        self.assertIn("- scripts/verify_bronze_demo_001.py", DATABRICKS_YML)
+        # Only the ingestion root and isolated read-only verifier ship; the
+        # operator scripts stay out of the bundle runtime, as do code maps.
         self.assertNotIn("generate_synthetic", DATABRICKS_YML)
         self.assertNotIn("promote_batch", DATABRICKS_YML)
         self.assertIn("- pipelines/**/codemap.md", DATABRICKS_YML)
