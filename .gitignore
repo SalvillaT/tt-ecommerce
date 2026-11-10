@@ -58,3 +58,7 @@ Thumbs.db
 codemap.md
 **/codemap.md
 AGENTS.md
+
+# Evidencia local del operador: actas y salidas pendientes de firma, en poder del operador,
+# deliberadamente excluidas del repositorio (no subir a Git ni eliminarlas para ocultar hechos)
+/evidence-local/
