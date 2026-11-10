@@ -82,10 +82,25 @@ class BronzeVerificationScriptTests(unittest.TestCase):
                 "rescued_rows": expected["rescued_rows"],
                 "corrupt_rows": expected["corrupt_rows"],
             }]
+            responses[verifier.provenance_summary_sql(expected["table"])] = [{
+                "batch_id": verifier.BATCH_ID,
+                "_pipeline_run_id": "run-1",
+                "raw_rows": expected["raw_rows"],
+                "complete_provenance_rows": expected["raw_rows"],
+                "canonical_source_path_rows": expected["raw_rows"],
+            }]
         responses[verifier.ORDERS_PARSE_STATUS_SQL] = [
             {"parse_status": status, "row_count": count}
             for status, count in verifier.EXPECTED_ORDERS_PARSE_STATUS.items()
         ]
+        responses[verifier.ORDERS_RESCUE_PREDICATE_SQL] = [{
+            "extra_order_rows": 1,
+            "rescued_campaign_match_rows": 1,
+        }]
+        responses[verifier.ORDERS_CORRUPT_PREDICATE_SQL] = [{
+            "corrupt_rows": 1,
+            "corrupt_marker_match_rows": 1,
+        }]
         return responses
 
     def test_fixed_read_only_statements_produce_passing_machine_readable_report(self):
@@ -95,8 +110,12 @@ class BronzeVerificationScriptTests(unittest.TestCase):
         expected_statements = [
             *(self.verifier.raw_summary_sql(expected["table"])
               for expected in self.verifier.RAW_EXPECTATIONS.values()),
+            *(self.verifier.provenance_summary_sql(expected["table"])
+              for expected in self.verifier.RAW_EXPECTATIONS.values()),
             self.verifier.RUN_LOG_SQL,
             self.verifier.ORDERS_PARSE_STATUS_SQL,
+            self.verifier.ORDERS_RESCUE_PREDICATE_SQL,
+            self.verifier.ORDERS_CORRUPT_PREDICATE_SQL,
         ]
         self.assertEqual(spark.statements, expected_statements)
         self.assertEqual(report["batch_id"], "DEMO-001")
@@ -106,6 +125,12 @@ class BronzeVerificationScriptTests(unittest.TestCase):
         self.assertEqual(rendered, self.verifier.report_json(report))
         self.assertEqual(json.loads(rendered)["gate"]["passed"], True)
         self.assertNotIn("abfss://", rendered)
+        self.assertNotIn("SYN-CAMP-01", rendered)
+        self.assertNotIn("ORD-MALF-01", rendered)
+        self.assertNotIn("source_campaign", rendered)
+        self.assertNotIn("P-2", rendered)
+        self.assertNotIn("P-3", rendered)
+        self.assertNotIn("RE-PA", rendered)
 
     def test_gate_reports_exact_count_failure_without_claiming_completion_from_metrics(self):
         responses = self._responses()
@@ -117,6 +142,37 @@ class BronzeVerificationScriptTests(unittest.TestCase):
         failed = {check["name"] for check in report["gate"]["checks"] if not check["passed"]}
         self.assertEqual(failed, {"orders_raw_exact_counts"})
         self.assertNotIn("rows_written", self.verifier.RUN_LOG_SQL)
+
+    def test_redacted_predicate_and_provenance_failures_are_explicit(self):
+        responses = self._responses()
+        responses[self.verifier.provenance_summary_sql("customers_raw")][0][
+            "canonical_source_path_rows"
+        ] = 10
+        responses[self.verifier.ORDERS_RESCUE_PREDICATE_SQL][0][
+            "rescued_campaign_match_rows"
+        ] = 0
+        responses[self.verifier.ORDERS_CORRUPT_PREDICATE_SQL][0][
+            "corrupt_marker_match_rows"
+        ] = 0
+
+        report = self.verifier.collect_report(FakeSpark(responses))
+        self.assertFalse(report["gate"]["passed"])
+        failed = {check["name"] for check in report["gate"]["checks"] if not check["passed"]}
+        self.assertEqual(failed, {
+            "customers_p1_redacted_provenance",
+            "orders_p4_redacted_rescue_predicate",
+            "orders_p5_redacted_corrupt_predicate",
+        })
+
+    def test_redacted_queries_are_fixed_predicates_without_payload_projection(self):
+        provenance_sql = self.verifier.provenance_summary_sql("orders_raw")
+        self.assertIn("arrival_date=2026-11-09/batch_id=DEMO-001", provenance_sql)
+        self.assertIn("complete_provenance_rows", provenance_sql)
+        self.assertNotIn("SELECT _source_file", provenance_sql)
+        self.assertIn("get_json_object(_rescued_data", self.verifier.ORDERS_RESCUE_PREDICATE_SQL)
+        self.assertNotIn("SELECT _rescued_data", self.verifier.ORDERS_RESCUE_PREDICATE_SQL)
+        self.assertIn("instr(_corrupt_record", self.verifier.ORDERS_CORRUPT_PREDICATE_SQL)
+        self.assertNotIn("SELECT _corrupt_record", self.verifier.ORDERS_CORRUPT_PREDICATE_SQL)
 
     def test_unknown_raw_table_is_rejected_without_spark(self):
         with self.assertRaises(ValueError):

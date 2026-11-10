@@ -80,6 +80,49 @@ ORDER BY batch_id ASC, _pipeline_run_id ASC
 """.strip()
 
 
+def provenance_summary_sql(table: str) -> str:
+    """Return redacted provenance predicates for one fixed contract table."""
+    if table not in {expected["table"] for expected in RAW_EXPECTATIONS.values()}:
+        raise ValueError("unknown verification table")
+    return f"""
+SELECT
+  batch_id, _pipeline_run_id,
+  COUNT(*) AS raw_rows,
+  SUM(CASE WHEN _source_file IS NOT NULL
+                 AND _source_file_size IS NOT NULL
+                 AND _source_file_modification_time IS NOT NULL
+                 AND _ingested_at IS NOT NULL
+           THEN 1 ELSE 0 END) AS complete_provenance_rows,
+  SUM(CASE WHEN _source_file LIKE '%arrival_date=2026-11-09/batch_id=DEMO-001/%'
+           THEN 1 ELSE 0 END) AS canonical_source_path_rows
+FROM {CATALOG_SCHEMA}.{table}
+WHERE batch_id = 'DEMO-001'
+GROUP BY batch_id, _pipeline_run_id
+ORDER BY batch_id ASC, _pipeline_run_id ASC
+""".strip()
+
+
+ORDERS_RESCUE_PREDICATE_SQL = """
+SELECT
+  SUM(CASE WHEN order_id = 'ORD-EXTRA-01' THEN 1 ELSE 0 END) AS extra_order_rows,
+  SUM(CASE WHEN order_id = 'ORD-EXTRA-01'
+                 AND get_json_object(_rescued_data, '$.source_campaign') = 'SYN-CAMP-01'
+           THEN 1 ELSE 0 END) AS rescued_campaign_match_rows
+FROM tt_ecommerce_synthetic.bronze.orders_raw
+WHERE batch_id = 'DEMO-001'
+""".strip()
+
+
+ORDERS_CORRUPT_PREDICATE_SQL = """
+SELECT
+  SUM(CASE WHEN _corrupt_record IS NOT NULL THEN 1 ELSE 0 END) AS corrupt_rows,
+  SUM(CASE WHEN instr(_corrupt_record, '"order_id":"ORD-MALF-01"') > 0
+           THEN 1 ELSE 0 END) AS corrupt_marker_match_rows
+FROM tt_ecommerce_synthetic.bronze.orders_raw
+WHERE batch_id = 'DEMO-001'
+""".strip()
+
+
 def _row_dict(row: Any) -> dict[str, Any]:
     if hasattr(row, "asDict"):
         return dict(row.asDict(recursive=True))
@@ -117,12 +160,46 @@ def evaluate_report(report: dict[str, Any]) -> dict[str, Any]:
             f"expected one pipeline group with {expected_values}; observed {groups}",
         ))
 
+    for source, expected in RAW_EXPECTATIONS.items():
+        groups = report["provenance_summaries"][source]
+        expected_rows = expected["raw_rows"]
+        passed = (len(groups) == 1 and groups[0].get("batch_id") == BATCH_ID
+                  and groups[0].get("raw_rows") == expected_rows
+                  and groups[0].get("complete_provenance_rows") == expected_rows
+                  and groups[0].get("canonical_source_path_rows") == expected_rows)
+        checks.append(_check(
+            f"{source}_p1_redacted_provenance",
+            passed,
+            "expected one group whose non-null provenance and canonical-path predicate "
+            f"counts both equal {expected_rows}; observed {groups}",
+        ))
+
     parse_status = {row["parse_status"]: row["row_count"]
                     for row in report["orders_parse_status"]}
     checks.append(_check(
         "orders_parse_status_distribution",
         parse_status == EXPECTED_ORDERS_PARSE_STATUS,
         f"expected {EXPECTED_ORDERS_PARSE_STATUS}; observed {parse_status}",
+    ))
+
+    rescue_rows = report["redacted_predicates"]["orders_rescue"]
+    rescue_passed = (len(rescue_rows) == 1
+                     and rescue_rows[0].get("extra_order_rows") == 1
+                     and rescue_rows[0].get("rescued_campaign_match_rows") == 1)
+    checks.append(_check(
+        "orders_p4_redacted_rescue_predicate",
+        rescue_passed,
+        f"expected exactly one scenario row and one redacted rescue predicate match; observed {rescue_rows}",
+    ))
+
+    corrupt_rows = report["redacted_predicates"]["orders_corrupt"]
+    corrupt_passed = (len(corrupt_rows) == 1
+                      and corrupt_rows[0].get("corrupt_rows") == 1
+                      and corrupt_rows[0].get("corrupt_marker_match_rows") == 1)
+    checks.append(_check(
+        "orders_p5_redacted_corrupt_predicate",
+        corrupt_passed,
+        f"expected exactly one corrupt row and one redacted corrupt predicate match; observed {corrupt_rows}",
     ))
 
     events = report["run_log_events"]
@@ -168,16 +245,29 @@ def evaluate_report(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def collect_report(spark) -> dict[str, Any]:
-    """Collect fixed evidence and evaluate it without any mutation or inference."""
+    """Collect fixed P-1/P-4/P-5 evidence without mutation or inference.
+
+    This first-attempt evidence gate deliberately does not claim P-2/P-3
+    reprocesing/recovery behavior or the time-bound RE-PA requirements.
+    """
     raw_tables = {
         source: _collect(spark, raw_summary_sql(expected["table"]))
+        for source, expected in RAW_EXPECTATIONS.items()
+    }
+    provenance_summaries = {
+        source: _collect(spark, provenance_summary_sql(expected["table"]))
         for source, expected in RAW_EXPECTATIONS.items()
     }
     report = {
         "batch_id": BATCH_ID,
         "run_log_events": _collect(spark, RUN_LOG_SQL),
         "raw_tables": raw_tables,
+        "provenance_summaries": provenance_summaries,
         "orders_parse_status": _collect(spark, ORDERS_PARSE_STATUS_SQL),
+        "redacted_predicates": {
+            "orders_rescue": _collect(spark, ORDERS_RESCUE_PREDICATE_SQL),
+            "orders_corrupt": _collect(spark, ORDERS_CORRUPT_PREDICATE_SQL),
+        },
     }
     report["gate"] = evaluate_report(report)
     return report
