@@ -1,5 +1,7 @@
 # TT E-commerce Lakehouse
 
+> **Idioma:** Español · [English](README.en.md)
+
 Proyecto para diseñar un e-commerce ficticio de material de tenis de mesa y su plataforma analítica gobernada en Azure. El objetivo no es operar una tienda real: es demostrar cómo transformar eventos de venta sintéticos en métricas fiables para negocio, manteniendo el acceso a datos personales bajo control.
 
 ## Resumen: resultado y evidencia
