@@ -1,30 +1,37 @@
-# TT E-commerce Bronze ingestion Declarative Automation Bundle (Fase 2).
+# TT E-commerce lakehouse Declarative Automation Bundle (Fases 2–3).
 #
-# Static bundle definition only: deploys/validates after the GF2 gates and a
-# separate human authorization. No schedule: the job is manual/visible, one
-# run at a time (job-level max_concurrent_runs=1) with retries 0. The run-as
-# identity is a bundle VARIABLE without a default value/secret: the operator
-# supplies the approved application (client) ID at validate/deploy/run time.
-# Serverless environment is conditional: target `development_serverless`
-# (default) attaches environment_key/spec; `development_classic` deliberately
-# omits both when Serverless Jobs is not available (GF2-7 decision).
+# Static bundle definition only: deploys/validates after the gates and a
+# separate human authorization. No schedule on any job: jobs are manual and
+# visible, one run at a time (job-level max_concurrent_runs=1) with retries 0.
+# Run-as identities are bundle VARIABLES without secrets: the operator supplies
+# the approved application (client) IDs at validate/deploy/run time. The Bronze
+# run-as variable keeps its empty default (the Bronze job refuses empty
+# inputs); the Silver run-as variable has NO default. Serverless environment is
+# conditional: target `development_serverless` (default) attaches
+# environment_key/spec; `development_classic` deliberately omits both when
+# Serverless Jobs is not available (GF2-7 decision).
 bundle:
   name: tt-ecommerce-bronze
 
 include:
   - resources/*.yml
 
-# Only ship what the job executes: the pipelines package and its root script.
-# Tests, docs, infra, data fixtures and the operator scripts are never
-# synchronized. The landing root is deployment configuration (bundle variable
-# passed as a fixed task argument), never a run-editable job parameter.
+# Only ship what the jobs execute: the pipelines package and the root
+# scripts. Tests, docs, infra, data fixtures and the operator scripts are
+# never synchronized. The landing root is deployment configuration (bundle
+# variable passed as a fixed task argument), never a run-editable job
+# parameter.
 sync:
   include:
-    # Runtime only: pipeline code plus the ingestion root and isolated,
-    # read-only DEMO-001 evidence verifier (operator scripts stay outside).
+    # Runtime only: pipeline code plus the Bronze ingestion root and its
+    # isolated read-only DEMO-001 evidence verifier, and the Silver DEMO-001
+    # materialization root and its read-only verifier (operator scripts stay
+    # outside).
     - pipelines/**
     - scripts/run_bronze_job.py
     - scripts/verify_bronze_demo_001.py
+    - scripts/run_silver_demo_001_job.py
+    - scripts/verify_silver_demo_001.py
   exclude:
     - pipelines/**/codemap.md
     - tests/**
@@ -53,6 +60,16 @@ variables:
       (`--landing-root=${var.landing_root}`); the entrypoint validates it
       strictly as the exact container root (layout.validate_landing_root).
     default: ""
+  silver_run_as_service_principal_name:
+    description: >-
+      Application (client) ID of the approved Silver DEMO-001 materialization
+      run-as service principal (a DIFFERENT principal from the Bronze run-as;
+      it must already hold the Phase 3 UC grants: catalog USE_CATALOG, Bronze
+      USE_SCHEMA plus read-only SELECT on the three raw tables, and USE_SCHEMA
+      plus CREATE_TABLE on silver/quarantine/gold). NO default: it must be
+      supplied explicitly at validate/deploy/run time (e.g.
+      --var "silver_run_as_service_principal_name=<sp-app-id>"); it is never a
+      secret and is never stored in this bundle.
   environment_key:
     description: >-
       Serverless environment key used only by the development_serverless
@@ -96,6 +113,18 @@ targets:
           tasks:
             - task_key: bronze_demo_001_verification
               environment_key: ${var.environment_key}
+        silver_demo_001_materialization_job:
+          # Conditional serverless support: attached only in this target; both
+          # ordered tasks run on the shared serverless environment.
+          environments:
+            - environment_key: ${var.environment_key}
+              spec:
+                client: "1"
+          tasks:
+            - task_key: silver_materialization
+              environment_key: ${var.environment_key}
+            - task_key: silver_demo_001_verify
+              environment_key: ${var.environment_key}
 
   development_classic:
     mode: development
@@ -131,3 +160,20 @@ targets:
           tasks:
             - task_key: bronze_demo_001_verification
               job_cluster_key: bronze_verification_classic
+        silver_demo_001_materialization_job:
+          # Serverless unavailable (GF2-7 fallback): the controlled ephemeral
+          # classic job cluster pattern, single worker, auto-terminating; the
+          # job keeps max_concurrent_runs 1, no schedule and retries 0.
+          job_clusters:
+            - job_cluster_key: silver_classic
+              new_cluster:
+                spark_version: ${var.classic_spark_version}
+                node_type_id: ${var.classic_node_type_id}
+                num_workers: 1
+                data_security_mode: SINGLE_USER
+                autotermination_minutes: 30
+          tasks:
+            - task_key: silver_materialization
+              job_cluster_key: silver_classic
+            - task_key: silver_demo_001_verify
+              job_cluster_key: silver_classic
