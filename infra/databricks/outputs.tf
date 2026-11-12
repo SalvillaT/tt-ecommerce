@@ -30,3 +30,13 @@ output "sql_warehouse_id" {
   value       = try(databricks_sql_endpoint.demo[0].id, null)
   description = "Null unless enable_sql_warehouse is true."
 }
+
+output "phase2_landing_external_location_names" {
+  value       = { for key, location in databricks_external_location.phase2_landing : key => location.name }
+  description = "Empty unless the separately approved Phase 2 ingestion foundation is enabled; exposes only orders, customers, products, and _control paths, never _staging."
+}
+
+output "phase2_ingestion_state_volume_path" {
+  value       = try(databricks_volume.phase2_ingestion_state[0].volume_path, null)
+  description = "Null unless the separately approved Phase 2 ingestion foundation is enabled; then /Volumes/<catalog>/pipeline_state/ingestion_state."
+}

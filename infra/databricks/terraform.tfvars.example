@@ -1,7 +1,25 @@
-# databricks_host                       = "https://adb-<workspace-id>.<region>.azuredatabricks.net"
-# access_connector_id                   = "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Databricks/accessConnectors/<connector>"
-# uc_managed_access_connector_id        = "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Databricks/accessConnectors/<uc-managed-connector>"
-# storage_account_name                  = "<adls-gen2-account-name>"
-# unity_catalog_prerequisites_confirmed = false
-# catalog_managed_storage_confirmed     = false
-# enable_sql_warehouse                  = false
+# databricks_host                         = "https://adb-<workspace-id>.<region>.azuredatabricks.net"
+# access_connector_id                     = "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Databricks/accessConnectors/<connector>"
+# uc_managed_access_connector_id          = "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Databricks/accessConnectors/<uc-managed-connector>"
+# storage_account_name                    = "<adls-gen2-account-name>"
+# unity_catalog_prerequisites_confirmed   = false
+# catalog_managed_storage_confirmed       = false
+# enable_sql_warehouse                    = false
+# Phase 2 foundation is opt-in. Copy the landing connector output and existing
+# dedicated job application ID only after separate approval; do not add secrets.
+# Its plan/apply is a separate human authorization, applies are not transactional
+# and failures must be reconciled. After apply, never reset the enable flag to
+# false: retirement requires a reviewed dedicated code change.
+# enable_phase2_ingestion_foundation      = false
+# phase2_ingestion_foundation_approved    = false
+# landing_access_connector_id             = null
+# phase2_job_run_as_application_id        = null
+# Phase 3 Silver foundation is opt-in and independent of the Phase 2 flags. The
+# Silver/quarantine/gold job identity is an existing, dedicated service
+# principal, separate from the Bronze run-as; this root only looks it up and
+# never creates or manages Entra applications, service principals, secrets, or
+# Azure RBAC. Its least-privilege grants are a separate human authorization;
+# copy the application ID only after that approval and do not add secrets.
+# enable_phase3_silver_foundation         = false
+# phase3_silver_foundation_approved       = false
+# phase3_silver_job_run_as_application_id = null

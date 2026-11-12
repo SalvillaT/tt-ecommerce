@@ -1,0 +1,7 @@
+# Capturas de pantalla del dossier
+
+Vacía por diseño: no hay imágenes provisionales ni placeholders falsos.
+
+- Estado de las 6 capturas previstas: `pending_operator_capture` (ver [`../evidence-index.yml`](../evidence-index.yml)).
+- Checklist de captura y redacción: [`../README.md`](../README.md).
+- Reglas: captura manual autenticada, redacción antes de commit, etiqueta `operator-reported`; nunca versionar una imagen no redactada ni una captura simulada.

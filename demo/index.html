@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f1e9">
+  <title>DEMO-001 · Lakehouse gobernado</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#contenido">Saltar al contenido</a>
+  <header class="topbar">
+    <a class="brand" href="#inicio" aria-label="DEMO-001, inicio"><span class="brand-mark">TT</span><span>TT / ANALÍTICA</span></a>
+    <span class="snapshot"><i aria-hidden="true"></i> Snapshot DEMO-001 <b>·</b> hito cloud reportado</span>
+    <span class="top-label">DEMOSTRADOR GOBERNADO <span>↗</span></span>
+  </header>
+
+  <main id="contenido">
+    <section class="hero" id="inicio" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span>01</span> · PROYECTO DE DATOS SINTÉTICOS</p>
+        <h1 id="hero-title">Del dato<br>al <em>criterio.</em></h1>
+        <p class="intro">Un lakehouse gobernado para un e-commerce ficticio de tenis de mesa. Una demostración acotada de cómo convertir datos de lote en métricas útiles, sin exponer información personal.</p>
+        <a class="text-link" href="#recorrido">Explorar el recorrido <span aria-hidden="true">↓</span></a>
+      </div>
+      <div class="hero-art" aria-label="Ilustración abstracta de una pelota de tenis de mesa sobre una mesa verde">
+        <div class="art-ring"></div><div class="art-ball"></div><div class="art-line"></div>
+        <span class="art-caption">UNA INSTANTÁNEA<br>CON LÍMITES CLAROS</span>
+        <span class="art-index">01 — 04</span>
+      </div>
+      </div>
+    </section>
+
+    <section class="results" aria-labelledby="results-title">
+      <div class="section-heading"><div><p class="eyebrow"><span>02</span> · RESULTADO PUBLICABLE</p><h2 id="results-title">Lo que sí sabemos.</h2></div><p class="section-note">Gold · celda pública<br>Supresión k-anónima aplicada</p></div>
+      <div class="view-switch" role="group" aria-label="Elegir vista de resultados">
+        <button type="button" class="view-button is-active" id="show-gold" aria-pressed="true" aria-controls="gold-view">Gold publicado</button>
+        <button type="button" class="view-button" id="show-quality" aria-pressed="false" aria-controls="quality-view">Evidencia de calidad</button>
+        <span class="visually-hidden" id="view-status" aria-live="polite" aria-atomic="true">Vista seleccionada: Gold publicado</span>
+      </div>
+      <div id="gold-view" class="view-panel" tabindex="-1" aria-labelledby="results-title">
+      <div class="result-grid">
+        <article class="revenue-card">
+          <div class="card-kicker"><span>INGRESOS PUBLICADOS</span><span class="live-dot">SNAPSHOT</span></div>
+          <p class="revenue">€640<span>.00</span></p>
+          <div class="revenue-foot"><span>Una celda segura para consulta</span><span class="arrow">↗</span></div>
+          <div class="revenue-decoration" aria-hidden="true">€</div>
+        </article>
+        <article class="stat-card"><span class="stat-symbol">↗</span><p class="stat-value">05</p><h3>Pedidos</h3><p>incluidos en Gold</p></article>
+        <article class="stat-card refund"><span class="stat-symbol">↘</span><p class="stat-value">00</p><h3>Reembolsos</h3><p>en el resultado publicado</p></article>
+      </div>
+      <div class="cell-wrap">
+        <div class="cell-title"><div><span class="mini-label">DETALLE AGREGADO</span><h3>La celda pública</h3></div><span class="safe-tag"><span aria-hidden="true">✓</span> PRIVACIDAD PROTEGIDA</span></div>
+        <div class="table-scroll"><table><caption class="visually-hidden">Única celda agregada publicada en Gold</caption><thead><tr><th scope="col">FECHA</th><th scope="col">CATEGORÍA</th><th scope="col">MERCADO</th><th scope="col">CANAL</th><th scope="col">PEDIDOS</th><th scope="col">INGRESOS</th></tr></thead><tbody><tr><td>10 ene 2026</td><td><span class="product-dot"></span> Paddle</td><td>ES-MD</td><td>Web</td><td>5</td><td class="amount">€640.00</td></tr></tbody></table></div>
+        <p class="table-foot">Solo se publica esta agrupación porque supera el umbral de privacidad. Las demás se suprimen.</p>
+      </div>
+      </div>
+    </section>
+
+    <section class="journey" id="recorrido" aria-labelledby="journey-title">
+      <div class="journey-heading"><p class="eyebrow"><span>03</span> · RECORRIDO DEL DATO</p><h2 id="journey-title">Cuatro pasos.<br><em>Un límite en cada uno.</em></h2><p>El objetivo no es publicar todo: es preservar el origen, tratar las incidencias y compartir solo lo que puede ser seguro.</p></div>
+      <ol class="steps">
+        <li><span class="step-num">01</span><span class="step-icon">⌗</span><h3>Contrato</h3><p>El lote sintético define estructura, alcance y reglas antes de procesarse.</p><span class="step-line"></span></li>
+        <li><span class="step-num">02</span><span class="step-icon">▣</span><h3>Bronze congelado</h3><p>La capa de entrada conserva el lote original como referencia inmutable.</p><span class="step-line"></span></li>
+        <li><span class="step-num">03</span><span class="step-icon">⌁</span><h3>Silver + cuarentena</h3><p>Se validan registros; los que no cumplen se apartan, no se esconden.</p><span class="step-line"></span></li>
+        <li><span class="step-num">04</span><span class="step-icon">◉</span><h3>Gold privado</h3><p>Se agregan métricas y se suprimen grupos demasiado pequeños.</p></li>
+      </ol>
+    </section>
+
+    <section class="quality view-panel" id="quality-view" tabindex="-1" aria-labelledby="quality-title">
+      <div class="quality-heading"><p class="eyebrow"><span>04</span> · CALIDAD Y GOBIERNO</p><h2 id="quality-title">La transparencia<br>también es un resultado.</h2><p>El proceso terminó con registros en cuarentena. Publicar este estado es parte del control, no una nota al pie.</p><span class="run-state">● COMPLETED_WITH_QUARANTINE</span></div>
+      <div class="quality-panel">
+        <div class="panel-top"><span>RESUMEN DEL PROCESAMIENTO</span><span class="panel-mark">DEMO—001</span></div>
+        <div class="quality-row"><span>Silver · pedidos válidos</span><strong>15</strong></div>
+        <div class="quality-row"><span>Silver · clientes</span><strong>10</strong></div>
+        <div class="quality-row"><span>Silver · productos</span><strong>7</strong></div>
+        <div class="quality-row warning"><span>Filas en cuarentena</span><strong>6 <small>revisar</small></strong></div>
+        <div class="divider-label">ANTES DE LA SUPRESIÓN</div>
+        <div class="pre-stats"><div><span>INGRESOS</span><strong>€812.20</strong></div><div><span>PEDIDOS</span><strong>13</strong></div><div><span>LÍNEAS REEMBOLSADAS</span><strong>2</strong></div></div>
+        <div class="divider-label">CONTROL DE PUBLICACIÓN</div>
+        <div class="publish-stats"><div><strong>1</strong><span>celda publicada</span></div><div><strong>8</strong><span>celdas suprimidas</span></div><div><strong>1</strong><span>duplicado detectado</span></div></div>
+        <p class="privacy-note"><span aria-hidden="true">◈</span> No se muestran filas privadas ni las ubicaciones exactas de las celdas suprimidas.</p>
+      </div>
+    </section>
+
+    <section class="evidence" aria-label="Alcance y evidencia">
+      <div class="evidence-copy"><span class="evidence-icon" aria-hidden="true">◎</span><div><h2>Una foto fija, no una señal en directo.</h2><p>DEMO-001 es una instantánea determinista y de alcance limitado. No representa datos en vivo, CDC ni streaming. Este sitio tampoco se conecta a SQL Warehouse o Power BI. Las cifras resumen un hito cloud reportado por el operador; esta presentación no es una verificación independiente ni una prueba reproducible.</p></div></div>
+      <div class="evidence-card"><span>ESTADO DE EVIDENCIA</span><strong>Hito cloud reportado</strong><small>Evidencia estática · DEMO-001</small><small>Las capturas redactadas de Databricks se enlazarán desde el dossier cuando se recopilen manualmente. Aún no están adjuntas.</small></div>
+    </section>
+  </main>
+  <footer><a class="brand" href="#inicio"><span class="brand-mark">TT</span><span>TT / ANALÍTICA</span></a><span>Datos sintéticos · demo estática</span><a href="#inicio">Volver arriba ↑</a></footer>
+</body>
+</html>

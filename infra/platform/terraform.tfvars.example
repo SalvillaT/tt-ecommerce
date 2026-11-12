@@ -1,4 +1,12 @@
-# name_prefix          = "ttdemo01"
+# name_prefix          = "xxxxxxx"
 # location             = "francecentral" # default; change deliberately with the corresponding regional review
-# storage_account_name = "stttdemo01lakefrc" # optional; must be globally unique
+# storage_account_name = "xxxxxxxxx" # optional; must be globally unique
 # tags = { environment = "demo", managed_by = "terraform", data_class = "synthetic-only" }
+# Phase 2 is opt-in and does not replace the existing Stage 2 controls. Each
+# layout and connector plan/apply needs separate human authorization; applies
+# are not transactional and failures must be reconciled. After an authorized
+# apply, never reset either enable flag to false: retirement needs reviewed code.
+# enable_phase2_landing_layout             = false
+# phase2_landing_layout_approved           = false
+# enable_phase2_landing_access_connector   = false
+# phase2_landing_access_connector_approved = false

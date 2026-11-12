@@ -43,6 +43,106 @@ resource "databricks_external_location" "lakehouse" {
   depends_on = [terraform_data.unity_catalog_gate]
 }
 
+resource "terraform_data" "phase2_ingestion_foundation_gate" {
+  count = var.enable_phase2_ingestion_foundation ? 1 : 0
+
+  input = {
+    approved                    = var.phase2_ingestion_foundation_approved
+    landing_access_connector_id = var.landing_access_connector_id
+    job_run_as_application_id   = var.phase2_job_run_as_application_id
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.phase2_ingestion_foundation_approved
+      error_message = "Phase 2 ingestion foundation is enabled but not approved. Set phase2_ingestion_foundation_approved = true only after approving the dedicated landing connector, four read-only source paths, and managed pipeline state design."
+    }
+
+    precondition {
+      condition     = var.landing_access_connector_id != null && length(trimspace(var.landing_access_connector_id)) > 0
+      error_message = "Phase 2 ingestion foundation requires a non-empty landing_access_connector_id from the separately approved platform landing Access Connector."
+    }
+
+    precondition {
+      condition     = var.phase2_job_run_as_application_id != null && length(trimspace(var.phase2_job_run_as_application_id)) > 0
+      error_message = "Phase 2 ingestion foundation requires a non-empty phase2_job_run_as_application_id for an existing Databricks service principal."
+    }
+  }
+}
+
+# The service principal is an existing identity. The lookup validates that it
+# exists in Databricks; Terraform does not create or manage it or its Entra app.
+data "databricks_service_principal" "phase2_job_run_as" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  application_id = var.phase2_job_run_as_application_id
+}
+
+resource "databricks_storage_credential" "phase2_landing" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  name    = "tt-phase2-landing-credential"
+  comment = "Phase 2 managed identity credential for read-only access to approved landing source paths."
+
+  azure_managed_identity {
+    access_connector_id = var.landing_access_connector_id
+  }
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+locals {
+  # No location is defined for landing/_staging. Local users/operators upload
+  # there through their existing Azure permissions; the job gets neither UC
+  # access nor direct Azure RBAC to staging.
+  phase2_landing_external_locations = {
+    orders = {
+      name = "tt_phase2_landing_orders"
+      path = "orders"
+    }
+    customers = {
+      name = "tt_phase2_landing_customers"
+      path = "customers"
+    }
+    products = {
+      name = "tt_phase2_landing_products"
+      path = "products"
+    }
+    control = {
+      name = "tt_phase2_landing_control"
+      path = "_control"
+    }
+  }
+}
+
+resource "databricks_external_location" "phase2_landing" {
+  for_each = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? local.phase2_landing_external_locations : {}
+
+  name            = each.value.name
+  url             = "abfss://landing@${var.storage_account_name}.dfs.core.windows.net/${each.value.path}"
+  credential_name = databricks_storage_credential.phase2_landing[0].id
+  comment         = "Phase 2 read-only source location for landing/${each.value.path}; excludes landing/_staging."
+  read_only       = true
+
+  # Do not set skip_validation: the authorized apply must verify Azure RBAC.
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  depends_on = [terraform_data.phase2_ingestion_foundation_gate]
+}
+
 resource "databricks_catalog" "synthetic" {
   name    = var.catalog_name
   comment = "Terraform-managed catalog for the synthetic tt-ecommerce project."
@@ -99,6 +199,43 @@ resource "databricks_schema" "phase1" {
   depends_on = [databricks_catalog.synthetic]
 }
 
+resource "databricks_schema" "phase2_pipeline_state" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  catalog_name = databricks_catalog.synthetic.name
+  name         = "pipeline_state"
+  comment      = "Managed Phase 2 pipeline state schema for checkpoints and operational state."
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    databricks_catalog.synthetic,
+    terraform_data.phase2_ingestion_foundation_gate,
+  ]
+}
+
+resource "databricks_volume" "phase2_ingestion_state" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  name         = "ingestion_state"
+  catalog_name = databricks_catalog.synthetic.name
+  schema_name  = databricks_schema.phase2_pipeline_state[0].name
+  volume_type  = "MANAGED"
+  comment      = "Managed Phase 2 ingestion checkpoint and state volume."
+
+  lifecycle {
+    # Retirement requires a reviewed, dedicated code change; never reset the
+    # opt-in flag after an authorized apply.
+    prevent_destroy = true
+  }
+
+  depends_on = [terraform_data.phase2_ingestion_foundation_gate]
+}
+
 resource "databricks_grant" "engineer_writer_catalog" {
   catalog = databricks_catalog.synthetic.name
 
@@ -108,15 +245,248 @@ resource "databricks_grant" "engineer_writer_catalog" {
   depends_on = [terraform_data.unity_catalog_gate]
 }
 
-resource "databricks_grant" "engineer_writer_schema" {
-  for_each = databricks_schema.phase1
+# Phase 2 write-ownership split: the Phase 2 run-as service principal owns all
+# Bronze writes (CREATE_TABLE granted by databricks_grant.phase2_job_bronze_schema),
+# so engineer_writer keeps CREATE_TABLE on silver/quarantine/gold only and never
+# on bronze. USE_SCHEMA is unchanged on every Phase 1 schema.
+locals {
+  engineer_writer_schema_privileges = {
+    bronze     = ["USE_SCHEMA"]
+    silver     = ["USE_SCHEMA", "CREATE_TABLE"]
+    quarantine = ["USE_SCHEMA", "CREATE_TABLE"]
+    gold       = ["USE_SCHEMA", "CREATE_TABLE"]
+  }
+}
 
-  schema = each.value.id
+resource "databricks_grant" "engineer_writer_schema" {
+  for_each = local.engineer_writer_schema_privileges
+
+  schema = databricks_schema.phase1[each.key].id
 
   principal  = var.engineer_writer_group_name
-  privileges = ["USE_SCHEMA", "CREATE_TABLE"]
+  privileges = each.value
 
   depends_on = [terraform_data.unity_catalog_gate]
+}
+
+resource "databricks_grant" "phase2_job_catalog" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  catalog = databricks_catalog.synthetic.name
+
+  principal  = var.phase2_job_run_as_application_id
+  privileges = ["USE_CATALOG"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+resource "databricks_grant" "phase2_job_bronze_schema" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  schema = databricks_schema.phase1["bronze"].id
+
+  principal  = var.phase2_job_run_as_application_id
+  privileges = ["USE_SCHEMA", "CREATE_TABLE"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+resource "databricks_grant" "phase2_job_landing_read" {
+  for_each = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? databricks_external_location.phase2_landing : {}
+
+  external_location = each.value.id
+
+  principal  = var.phase2_job_run_as_application_id
+  privileges = ["READ_FILES"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+resource "databricks_grant" "phase2_job_pipeline_state_schema" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  schema = databricks_schema.phase2_pipeline_state[0].id
+
+  principal  = var.phase2_job_run_as_application_id
+  privileges = ["USE_SCHEMA"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+resource "databricks_grant" "phase2_job_ingestion_state_volume" {
+  count = var.enable_phase2_ingestion_foundation && var.phase2_ingestion_foundation_approved ? 1 : 0
+
+  volume = databricks_volume.phase2_ingestion_state[0].id
+
+  principal  = var.phase2_job_run_as_application_id
+  privileges = ["READ_VOLUME", "WRITE_VOLUME"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase2_ingestion_foundation_gate,
+    data.databricks_service_principal.phase2_job_run_as,
+  ]
+}
+
+# Phase 3 Silver foundation (opt-in): a dedicated, existing Silver/quarantine/
+# gold job service principal, separate from the Bronze Phase 2 run-as. This
+# root only looks the identity up; it never creates or manages Entra
+# applications, service principals, secrets, or Azure RBAC.
+resource "terraform_data" "phase3_silver_foundation_gate" {
+  count = var.enable_phase3_silver_foundation ? 1 : 0
+
+  input = {
+    approved                  = var.phase3_silver_foundation_approved
+    job_run_as_application_id = var.phase3_silver_job_run_as_application_id
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.phase3_silver_foundation_approved
+      error_message = "Phase 3 Silver foundation is enabled but not approved. Set phase3_silver_foundation_approved = true only after approving its least-privilege model for the dedicated Silver/quarantine/gold job service principal: catalog USE_CATALOG, Bronze USE_SCHEMA plus read-only SELECT on exactly the three raw tables, and USE_SCHEMA plus CREATE_TABLE only on silver, quarantine, and gold; no landing, external location, credential, volume, or pipeline_state access."
+    }
+
+    precondition {
+      condition     = var.phase3_silver_job_run_as_application_id != null && length(trimspace(var.phase3_silver_job_run_as_application_id)) > 0
+      error_message = "Phase 3 Silver foundation requires a non-empty phase3_silver_job_run_as_application_id for an existing, dedicated Databricks service principal, separate from the Bronze run-as; this root only looks it up and never creates or manages identities."
+    }
+  }
+}
+
+# The Phase 3 service principal is an existing identity, independent of the
+# Phase 2 foundation. The lookup validates that it exists in Databricks;
+# Terraform does not create or manage it, its Entra app, or any Azure RBAC.
+data "databricks_service_principal" "phase3_silver_job_run_as" {
+  count = var.enable_phase3_silver_foundation && var.phase3_silver_foundation_approved ? 1 : 0
+
+  application_id = var.phase3_silver_job_run_as_application_id
+}
+
+locals {
+  # Phase 3 reads exactly the three Bronze raw tables (never the ingestion run
+  # log); these full three-part names are the only Bronze table access the
+  # Phase 3 service principal receives.
+  phase3_silver_bronze_read_tables = {
+    orders_raw    = "${var.catalog_name}.bronze.orders_raw"
+    customers_raw = "${var.catalog_name}.bronze.customers_raw"
+    products_raw  = "${var.catalog_name}.bronze.products_raw"
+  }
+
+  # Same computed-privilege pattern as engineer_writer_schema_privileges: the
+  # Phase 3 service principal creates and owns its own managed tables in the
+  # three target schemas and receives no other privileges there.
+  phase3_silver_target_schema_privileges = {
+    silver     = ["USE_SCHEMA", "CREATE_TABLE"]
+    quarantine = ["USE_SCHEMA", "CREATE_TABLE"]
+    gold       = ["USE_SCHEMA", "CREATE_TABLE"]
+  }
+}
+
+resource "databricks_grant" "phase3_silver_job_catalog" {
+  count = var.enable_phase3_silver_foundation && var.phase3_silver_foundation_approved ? 1 : 0
+
+  catalog = databricks_catalog.synthetic.name
+
+  principal  = var.phase3_silver_job_run_as_application_id
+  privileges = ["USE_CATALOG"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase3_silver_foundation_gate,
+    data.databricks_service_principal.phase3_silver_job_run_as,
+  ]
+}
+
+# Bronze stays read-only for the Phase 3 identity: USE_SCHEMA only, while the
+# Phase 2 run-as keeps sole Bronze write ownership.
+resource "databricks_grant" "phase3_silver_job_bronze_schema" {
+  count = var.enable_phase3_silver_foundation && var.phase3_silver_foundation_approved ? 1 : 0
+
+  schema = databricks_schema.phase1["bronze"].id
+
+  principal  = var.phase3_silver_job_run_as_application_id
+  privileges = ["USE_SCHEMA"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase3_silver_foundation_gate,
+    data.databricks_service_principal.phase3_silver_job_run_as,
+  ]
+}
+
+# The three raw tables are created and owned by the Phase 2 Bronze job on
+# first ingest; this grant targets those exact table names only.
+resource "databricks_grant" "phase3_silver_job_bronze_read" {
+  for_each = var.enable_phase3_silver_foundation && var.phase3_silver_foundation_approved ? local.phase3_silver_bronze_read_tables : {}
+
+  table = each.value
+
+  principal  = var.phase3_silver_job_run_as_application_id
+  privileges = ["SELECT"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase3_silver_foundation_gate,
+    data.databricks_service_principal.phase3_silver_job_run_as,
+  ]
+}
+
+resource "databricks_grant" "phase3_silver_job_target_schema" {
+  for_each = var.enable_phase3_silver_foundation && var.phase3_silver_foundation_approved ? local.phase3_silver_target_schema_privileges : {}
+
+  schema = databricks_schema.phase1[each.key].id
+
+  principal  = var.phase3_silver_job_run_as_application_id
+  privileges = each.value
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    terraform_data.phase3_silver_foundation_gate,
+    data.databricks_service_principal.phase3_silver_job_run_as,
+  ]
 }
 
 resource "terraform_data" "sql_warehouse_phase5_gate" {

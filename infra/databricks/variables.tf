@@ -77,6 +77,63 @@ variable "external_location_name" {
   default     = "tt_lakehouse"
 }
 
+variable "enable_phase2_ingestion_foundation" {
+  description = "Phase 2 opt-in for landing external locations, the pipeline_state schema and its managed ingestion-state volume. Defaults to false; no Phase 2 UC resources are created unless it and its approval are true. Operationally irreversible after apply: do not reset to false; retirement requires a reviewed dedicated code change."
+  type        = bool
+  default     = false
+}
+
+variable "phase2_ingestion_foundation_approved" {
+  description = "Phase 2 approval gate. Set true only after the landing read scope, dedicated run-as service principal, and managed pipeline state design are approved; it has no effect unless enable_phase2_ingestion_foundation is true. Its plan/apply is a separate human authorization and is not transactional with platform Phase 2 changes; reconcile after failures."
+  type        = bool
+  default     = false
+}
+
+variable "landing_access_connector_id" {
+  description = "Nullable resource ID of the separately approved Phase 2 landing-only Access Connector output by the platform root. Required only when Phase 2 ingestion foundation is enabled."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.landing_access_connector_id == null || length(trimspace(var.landing_access_connector_id)) > 0
+    error_message = "landing_access_connector_id must be null or a non-empty Access Connector resource ID."
+  }
+}
+
+variable "phase2_job_run_as_application_id" {
+  description = "Nullable Entra application (client) ID of an existing Databricks service principal used by the future Phase 2 job. This root only looks it up; it never creates or manages Entra applications or service principals. Required only when Phase 2 ingestion foundation is enabled."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.phase2_job_run_as_application_id == null || length(trimspace(var.phase2_job_run_as_application_id)) > 0
+    error_message = "phase2_job_run_as_application_id must be null or a non-empty Entra application ID."
+  }
+}
+
+variable "enable_phase3_silver_foundation" {
+  description = "Phase 3 opt-in for the Silver/quarantine/gold job service principal foundation: catalog USE_CATALOG, Bronze USE_SCHEMA plus read-only SELECT on exactly the three raw tables, and USE_SCHEMA plus CREATE_TABLE on the silver, quarantine, and gold schemas. Defaults to false; no Phase 3 grants are created unless it and its approval are true. The identity is an existing, dedicated service principal separate from the Bronze Phase 2 run-as; this root only looks it up and never creates or manages Entra applications, service principals, secrets, or Azure RBAC. Operationally irreversible after apply: do not reset to false; retirement requires a reviewed dedicated code change."
+  type        = bool
+  default     = false
+}
+
+variable "phase3_silver_foundation_approved" {
+  description = "Phase 3 approval gate. Set true only after the dedicated Silver/quarantine/gold job service principal and its least-privilege grant model are approved; it has no effect unless enable_phase3_silver_foundation is true. Its plan/apply is a separate human authorization."
+  type        = bool
+  default     = false
+}
+
+variable "phase3_silver_job_run_as_application_id" {
+  description = "Nullable Entra application (client) ID of the existing, dedicated Databricks service principal for the future Phase 3 Silver/quarantine/gold job. It is separate from the Bronze Phase 2 run-as identity; this root only looks it up and never creates or manages Entra applications, service principals, secrets, or Azure RBAC. Required only when Phase 3 Silver foundation is enabled."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.phase3_silver_job_run_as_application_id == null || length(trimspace(var.phase3_silver_job_run_as_application_id)) > 0
+    error_message = "phase3_silver_job_run_as_application_id must be null or a non-empty Entra application ID."
+  }
+}
+
 variable "enable_sql_warehouse" {
   description = "Phase 5-only explicit cost opt-in. Creates a PRO 2X-Small SQL Warehouse only when true and phase5_sql_warehouse_approved is true."
   type        = bool

@@ -1,0 +1,160 @@
+# Índice de evidencia visual del dossier (docs/portfolio/evidence/)
+# Estado: TODAS las capturas PENDIENTES de captura manual autenticada por el
+# operador (pending_operator_capture). No se registran captured_at, hashes ni
+# archivos que no existan. Integridad: toda la evidencia cloud de este dossier
+# es operator-reported (observación humana del run documentado; salidas de
+# consola), no reproducible desde Git ni evidencia de auditoría formal.
+# Reglas de redacción: ver README.md de esta carpeta. Nunca versionar una
+# imagen provisional o sin redactar.
+version: 1
+updated: 2026-11-12
+integrity_label_default: operator-reported
+capture_policy:
+  mode: manual_authenticated_ui_capture
+  redaction_required_before_commit: true
+  placeholders_allowed: false   # solo .gitkeep; nunca imágenes falsas
+entries:
+  - id: EV-01
+    filename: screenshots/01-gold-celda-publicada.png
+    status: pending_operator_capture
+    claim: >
+      La celda Gold vigente del hito DEMO-001 es exactamente una fila física:
+      paddle / ES-MD / web = 640.00 EUR, 5 pedidos, 0 líneas reembolsadas;
+      sin fila de rubber.
+    ui_location: >
+      Databricks UI -> Catalog -> catálogo sintético -> schema gold ->
+      tabla daily_sales_segment -> pestaña Data/Preview.
+    required_visible_result: >
+      Una única fila con total_revenue_eur=640.00, order_count=5 y
+      refunded_lines=0 para (paddle, ES-MD, web); ausencia de fila rubber.
+    redaction_list:
+      - URL completa del workspace
+      - IDs internos de tabla/volumen y rutas de almacenamiento
+      - identidades humanas (nombres/correos)
+    related_docs:
+      - ../01-caso-negocio.md
+      - ../../fase-3/ACTA_EVIDENCIA_CLOUD_DEMO-001.md
+    integrity_label: operator-reported
+
+  - id: EV-02
+    filename: screenshots/02-calidad-y-cuarentena.png
+    status: pending_operator_capture
+    claim: >
+      La cuarentena contiene 6 rechazos esperados (5 de orders, 1 de customers)
+      con reglas explicables, y el reporte registra estado
+      COMPLETED_WITH_QUARANTINE con controles pre-supresión 812.20/13/2.
+    ui_location: >
+      Databricks UI -> Catalog -> schema quarantine -> tabla
+      data_quality_rejections (Data/Preview); y schema silver -> tabla
+      materialization_run_report.
+    required_visible_result: >
+      6 filas de rechazo con rule_id visibles y sin payload crudo; una fila de
+      reporte con estado COMPLETED_WITH_QUARANTINE y controles
+      812.20/13/2.
+    redaction_list:
+      - URL completa del workspace
+      - IDs internos y timestamps de sistema con identidad
+      - cualquier identificador de cliente o contacto
+    related_docs:
+      - ../01-caso-negocio.md
+      - ../03-databricks-jobs-y-ejecucion.md
+      - ../../fase-3/ACTA_EVIDENCIA_CLOUD_DEMO-001.md
+    integrity_label: operator-reported
+
+  - id: EV-03
+    filename: screenshots/03-configuracion-job-silver.png
+    status: pending_operator_capture
+    claim: >
+      El job Silver del hito está definido en el bundle como job manual (sin
+      schedule, max_concurrent_runs 1, max_retries 0) con dos tareas ordenadas
+      (materialización -> verificación read-only), parámetros de run solo
+      batch_id/audit_timestamp y run-as = SP dedicado.
+    ui_location: >
+      Databricks UI -> Workflows -> Jobs -> job de materialización Silver
+      DEMO-001 -> pestañas Tasks/Details.
+    required_visible_result: >
+      Dos tareas en orden (silver_materialization -> silver_demo_001_verify),
+      sin schedule, concurrencia 1, retries 0, parámetros limitados y run-as
+      como service principal.
+    redaction_list:
+      - job ID completo
+      - application ID del service principal (mostrar solo "SP dedicado")
+      - URL completa del workspace
+      - nombres/correos de personas
+      - rutas de workspace completas con cuentas
+    related_docs:
+      - ../03-databricks-jobs-y-ejecucion.md
+      - ../../resources/silver_demo_001_job.yml
+    integrity_label: operator-reported
+
+  - id: EV-04
+    filename: screenshots/04-dag-run-exitoso.png
+    status: pending_operator_capture
+    claim: >
+      El run exitoso del hito completó las dos tareas en verde con su
+      dependencia (materialización -> verificación read-only).
+    ui_location: >
+      Databricks UI -> Workflows -> job -> Runs -> run exitoso del hito ->
+      vista grafo/DAG.
+    required_visible_result: >
+      Las dos tareas en verde, dependencia visible, estado de éxito del run.
+    redaction_list:
+      - run ID y task run IDs completos
+      - URL completa del workspace
+      - timestamps exactos si se prefiere omitir
+      - identidades humanas
+    related_docs:
+      - ../02-correccion-del-pipeline.md
+      - ../03-databricks-jobs-y-ejecucion.md
+      - ../../fase-3/ACTA_EVIDENCIA_CLOUD_DEMO-001.md
+    integrity_label: operator-reported
+
+  - id: EV-05
+    filename: screenshots/05-salida-verificador.png
+    status: pending_operator_capture
+    claim: >
+      El verificador read-only terminó con todos los chequeos en verde:
+      Silver 15/10/7, cuarentena 6, celda Gold 640.00/5/0, controles
+      pre-supresión 812.20/13/2, estado COMPLETED_WITH_QUARANTINE y
+      ausencia de columnas PII en Gold.
+    ui_location: >
+      Databricks UI -> Workflows -> run exitoso -> tarea
+      silver_demo_001_verify -> Logs / salida estándar.
+    required_visible_result: >
+      JSON del verificador con cada chequeo passed y los valores 15/10/7,
+      6, 640.00/5/0, 812.20/13/2 y COMPLETED_WITH_QUARANTINE visibles.
+    redaction_list:
+      - URL completa del workspace
+      - IDs de run/tarea
+      - rutas de workspace
+      - cualquier token o valor de sesión del log
+    related_docs:
+      - ../01-caso-negocio.md
+      - ../03-databricks-jobs-y-ejecucion.md
+      - ../../scripts/verify_silver_demo_001.py
+    integrity_label: operator-reported
+
+  - id: EV-06
+    filename: screenshots/06-permisos-uc.png
+    status: pending_operator_capture
+    claim: >
+      El gobierno de mínimo privilegio está aplicado en Unity Catalog: el SP
+      dedicado de Silver solo tiene sus grants mínimos (USE_CATALOG;
+      USE_SCHEMA en bronze; SELECT limitado a las tres tablas raw;
+      USE_SCHEMA+CREATE_TABLE en silver/quarantine/gold) y el grupo escritor
+      no tiene CREATE_TABLE en bronze.
+    ui_location: >
+      Databricks UI -> Catalog -> catálogo sintético -> pestaña Permissions
+      (y permissions de los schemas silver/bronze si caben en la captura).
+    required_visible_result: >
+      Privilegios del SP de Silver limitados al modelo de mínimo privilegio y
+      grants del grupo escritor sin CREATE_TABLE en bronze.
+    redaction_list:
+      - application IDs y nombres de SP
+      - nombres de grupos y usuarios humanos (dejar visibles solo privilegios)
+      - URL completa del workspace
+    related_docs:
+      - ../04-unity-catalog-y-gobierno.md
+      - ../../infra/databricks/main.tf
+      - ../../infra/databricks/codemap.md
+    integrity_label: operator-reported

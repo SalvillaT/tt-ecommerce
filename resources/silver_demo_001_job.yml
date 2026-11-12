@@ -1,0 +1,55 @@
+# Silver DEMO-001 materialization Job resource (Fase 3 portfolio milestone).
+#
+# Manual, single-writer job: no schedule (triggered only by an authorized
+# `databricks bundle run ...`), job-level `max_concurrent_runs: 1` and task
+# `max_retries: 0`. The run-as service principal comes from its OWN bundle
+# variable (no default, no secret, no embedded identity) and is the sole first
+# creator/owner of the managed silver/quarantine/gold output tables.
+#
+# Two ordered tasks: `silver_materialization` writes the scoped output tables
+# and the final report; `silver_demo_001_verify` runs the read-only verifier
+# only after materialization succeeded. Run parameters are limited to
+# `batch_id` / `audit_timestamp` (forwarded as fixed script arguments); the
+# bundle default audit timestamp makes repeated runs deterministic. Catalog,
+# schemas, tables and scope are local constants of the job code, never
+# run-editable parameters.
+resources:
+  jobs:
+    silver_demo_001_materialization_job:
+      name: tt-ecommerce-silver-demo-001-materialization
+      max_concurrent_runs: 1
+
+      parameters:
+        - name: batch_id
+          default: "DEMO-001"
+        - name: audit_timestamp
+          default: "2026-01-20T12:00:00Z"
+
+      run_as:
+        service_principal_name: ${var.silver_run_as_service_principal_name}
+
+      tasks:
+        - task_key: silver_materialization
+          max_retries: 0
+          timeout_seconds: 3600
+          spark_python_task:
+            # Root script so `pipelines` imports resolve as workspace files.
+            python_file: ${workspace.file_path}/scripts/run_silver_demo_001_job.py
+            source: WORKSPACE
+            parameters:
+              - "--batch-id={{job.parameters.batch_id}}"
+              - "--audit-timestamp={{job.parameters.audit_timestamp}}"
+              # Internal bootstrap argument (source: WORKSPACE runs the script
+              # via exec without `__file__`): fixed task configuration, NOT a
+              # run-editable parameter; validated before `pipelines` imports.
+              - "--pipelines-root=${workspace.file_path}"
+        - task_key: silver_demo_001_verify
+          depends_on:
+            - task_key: silver_materialization
+          max_retries: 0
+          timeout_seconds: 900
+          spark_python_task:
+            # Read-only verifier: fixed SELECT/DESCRIBE statements only, no
+            # run-editable parameters by design.
+            python_file: ${workspace.file_path}/scripts/verify_silver_demo_001.py
+            source: WORKSPACE

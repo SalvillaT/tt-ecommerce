@@ -1,0 +1,16 @@
+# Manual, read-only evidence task for the already completed DEMO-001 batch.
+# It is intentionally a separate job: it never invokes the ingestion entrypoint.
+resources:
+  jobs:
+    bronze_demo_001_verification_job:
+      name: tt-ecommerce-bronze-demo-001-verification-read-only
+      max_concurrent_runs: 1
+      run_as:
+        service_principal_name: ${var.run_as_service_principal_name}
+      tasks:
+        - task_key: bronze_demo_001_verification
+          max_retries: 0
+          timeout_seconds: 900
+          spark_python_task:
+            python_file: ${workspace.file_path}/scripts/verify_bronze_demo_001.py
+            source: WORKSPACE

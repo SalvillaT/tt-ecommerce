@@ -1,0 +1,2 @@
+# Canonical fixture bytes are part of the manifest SHA-256 contract.
+data/sample/** text eol=lf
