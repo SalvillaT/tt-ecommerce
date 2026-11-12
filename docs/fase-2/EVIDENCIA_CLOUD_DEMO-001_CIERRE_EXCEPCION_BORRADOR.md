@@ -7,6 +7,7 @@
 - Documentación pura, acotada a este archivo. No se ejecutó ninguna llamada cloud (Azure, Databricks ni otra) para producirlo; todo lo aquí consignado procede del **reporte del operador** y de su **evidencia redactada, en poder del operador y externa a este repositorio**. Este repositorio por sí solo no constituye evidencia cloud directa.
 - Sigue la higiene de la [plantilla de evidencia](EVIDENCIA_CLOUD_TEMPLATE.md): **ningún identificador real** entra en Git. Todo valor sensible se expresa con placeholders: `<subscription>`, `<tenant>`, `<storage_account>`, `<workspace_url>`, `<sp-application-id>`, `<job_id>`, `<run_id>`, `<task_run_id>`, `<pipeline_id>`, `<attempt_id>`, `<endpoint_id>`, etc. Sin secretos, tokens, cadenas de conexión ni contenido de datos crudo: los datos del lote se citan solo por sus recuentos ya públicos del contrato (26/11/7, 44) y sus identificadores de escenario sintético canónicos (`ORD-EXTRA-01`, `ORD-MALF-01`, `SYN-CAMP-01`), que son parte del fixture documentado, no datos reales.
 - No sustituye a la [plantilla de evidencia](EVIDENCIA_CLOUD_TEMPLATE.md) ni a sus bitácoras de sesión: las bitácoras firmadas siguen siendo el conducto de evidencia. Este borrador organiza el **cierre de conjunto** y las excepciones.
+- **Addenda 2026-11-12:** la sección §9 registra la evidencia operador disponible a esa fecha (ingesta única de `DEMO-001`, verificación read-only independiente e invariante de congelación de Bronze) y enlaza el hito Silver de Fase 3 a su acta propia. El estado del documento sigue `SIN FIRMAR` y ninguno de esos registros sustituye la adjunción, el atestiguamiento ni la firma externa pendientes.
 
 ---
 
@@ -159,3 +160,28 @@ La redacción siguiente es una **plantilla de articulado para el acta**, con tod
 - **No afirma cobertura completa de P-2 ni P-3**; los registra como diferidos. Los hallazgos read-only de P-1/P-4/P-5 requieren todavía adjunción y firma externas antes de cualquier declaración de cobertura firmada.
 - **No inventa aprobación, autoridad, firma, fecha, coste ni estado de runtime**: todos quedan con placeholders o marcados `PENDIENTE`/`SIN FIRMAR`.
 - **No contiene identificadores reales, secretos ni datos crudos**: solo placeholders y los recuentos e identificadores de escenario contractuales ya documentados.
+
+---
+
+## 9. Addenda 2026-11-12 — evidencia operador registrada (documento SIGUE SIN FIRMAR)
+
+**Naturaleza de esta addenda.** Consigna, con fecha, la evidencia del operador disponible al cierre del ciclo Bronze de `DEMO-001`, tal como fue reportada (salidas de consola suministradas en la sesión de documentación). **No rellena campos del índice §1, no marca ningún gate ni bloque `DISPONIBLE/FIRMADA` y no declara el pase de RE-PA-1/RE-PA-2 ni de P-2/P-3.** La firma externa sigue pendiente y los placeholders de identificadores (`<job_id>`, `<run_id>`, `<sp-application-id>`, …) permanecen intactos: los identificadores reales de esta ejecución Bronze no forman parte de la documentación registrada y no se inventan aquí.
+
+### 9.1 Hechos registrados (todos: reporte del operador, pendientes de adjunción/firma externa)
+
+| # | Hecho | Soporte registrado |
+| --- | --- | --- |
+| R-01 | La primera ingesta Bronze de `DEMO-001` se ejecutó **una única vez** en cloud y fue **verificada de forma independiente en solo lectura**. | Verificación read-only de §2.3, ejecutada tras la ingesta |
+| R-02 | Recuentos raw exactos sobre Bronze: `orders` **26**, `customers` **11**, `products` **7** (coincide con F-06 y con el contrato del lote). | Verificación read-only |
+| R-03 | Evidencia de **anomalías** (fila rescatada y fila corrupta en orders, §2.3/F-07), **procedencia** (`batch_id`/`_metadata`), **checkpoints por fuente retenidos** (F-12) y **run-log** con la secuencia esperada sin `FAILED` (F-08/F-09) presente al cierre del ciclo. | Verificación read-only y consulta del run-log |
+| R-04 | **Invariante de congelación de Bronze** (obligación operativa desde el cierre del ciclo): sin re-ejecuciones de la ingesta, sin mutación de `landing` y sin reseteo de checkpoints. Cualquier ingesta futura exige sus propias autorizaciones (GF2 vigentes, aprobación de cómputo por ejecución, RE-PA-1/RE-PA-2 firmados en su ventana). | Restricción operativa registrada en este documento |
+
+### 9.2 Enlace con el hito Silver de Fase 3
+
+El trabajo posterior de materialización Silver/Gold del lote `DEMO-001` se documenta en el [acta de evidencia cloud de Fase 3](../fase-3/ACTA_EVIDENCIA_CLOUD_DEMO-001.md) (identificadores propios del SP, job y runs de Silver, y controles de resultado). Esa acta es **evidencia reportada por el operador**, no re-verificada desde este repositorio, **no firma este borrador, no cierra Fase 2 y no sustituye ningún campo de §1**.
+
+### 9.3 Estado que conserva este documento
+
+- `SIN FIRMAR`: sin firma externa de la autoridad humana, sin waiver/acta de RE-PA-1/RE-PA-2 (E-11) y sin adjunción de E-01…E-10/E-12.
+- P-2/P-3 siguen **diferidos** (§5); RE-PA-1/RE-PA-2 siguen **sin pase retroactivo** (§4).
+- **No se declara Fase 2 cerrada.**
