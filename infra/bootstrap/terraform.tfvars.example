@@ -1,3 +1,8 @@
-# resource_group_name  = "rg-tt-state-frc"
+# Ejemplo público y seguro de `terraform.tfvars` (root bootstrap).
+# Este archivo es un ejemplo para repositorio público: no debe contener
+# nombres reales de infraestructura ni credenciales del estado. Los valores
+# son marcadores ficticios que resuelven la sintaxis de las variables;
+# sustitúyelos en tu entorno y nunca versiones el tfvars real.
+# resource_group_name  = "rg-example-tfstate-000"
 # location             = "francecentral" # default; state root remains independent of platform
-# storage_account_name = "sttttfstatefrc01" # must be globally unique
+# storage_account_name = "exampletfstate001" # must be globally unique

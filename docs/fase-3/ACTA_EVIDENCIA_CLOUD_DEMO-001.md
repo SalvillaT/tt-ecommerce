@@ -1,6 +1,6 @@
 # Fase 3 — Acta de evidencia cloud del hito Silver `DEMO-001`
 
-**Naturaleza de la evidencia.** Todo lo consignado aquí como resultado cloud es **evidencia reportada por el operador**: salidas de consola suministradas en la sesión de documentación, **no re-ejecutadas ni re-verificadas desde este repositorio**. Se distingue explícitamente de la **evidencia commiteada del repositorio** (código, bundle, Terraform y las **287 pruebas `unittest` locales en verde**, sin credenciales cloud), que no acredita ejecución en el workspace. Este documento **no firma gates, no cierra Fase 2** —su [cierre por excepción](../fase-2/EVIDENCIA_CLOUD_DEMO-001_CIERRE_EXCEPCION_BORRADOR.md) permanece **sin firmar**— y no inventa aprobación, autoridad ni firma alguna.
+**Naturaleza de la evidencia.** Todo lo consignado aquí como resultado cloud es **evidencia reportada por el operador**: salidas de consola suministradas en la sesión de documentación, **no re-ejecutadas ni re-verificadas desde este repositorio**. Se distingue explícitamente de la **evidencia commiteada del repositorio** (código, bundle, Terraform y las **287 pruebas `unittest` locales en verde**, sin credenciales cloud), que no acredita ejecución en el workspace. Este documento **no firma gates, no cierra Fase 2** —su [cierre por excepción](../fase-2/EVIDENCIA_CLOUD_DEMO-001_CIERRE_EXCEPCION_BORRADOR.md) permanece **sin firmar**— y no inventa aprobación, autoridad ni firma alguna. **Nota de redacción (revisión de seguridad):** los identificadores operativos reales de Databricks —application ID del SP dedicado de Silver, job ID y IDs de run— se consignan con marcadores semánticos (`<silver-service-principal>`, `<silver-materialization-job>`, `<failed-pre-access-run>`, `<successful-silver-run>`); los valores reales se omiten del árbol actual y permanecen en la evidencia externa al repositorio. Esta redacción no altera commits históricos previos.
 
 ---
 
@@ -25,13 +25,13 @@ Alcance declarado sin ambigüedad: **no** es streaming, CDC, SCD, incremental ge
 | # | Precondición | Detalle registrado |
 | --- | --- | --- |
 | P-01 | **Bronze congelado y verificado.** El lote `DEMO-001` se ingirió una única vez en Fase 2 y fue verificado de forma independiente en lectura (recuentos raw 26/11/7; evidencia de anomalías, procedencia, checkpoints y run-log). Ver [cierre por excepción de Fase 2](../fase-2/EVIDENCIA_CLOUD_DEMO-001_CIERRE_EXCEPCION_BORRADOR.md), §9. | Evidencia operador (Bronze) |
-| P-02 | **Identidad dedicada de Silver.** Service principal Entra/Databricks con application ID `3d25b147-73a3-4c2f-878b-1d6f0d886c2e` (identificador ya documentado; no es un secreto). | Evidencia operador |
+| P-02 | **Identidad dedicada de Silver.** Service principal Entra/Databricks **dedicado**, citado en esta acta con el marcador semántico `<silver-service-principal>` (por revisión de seguridad, el valor real del application ID no se publica en Git; no es un secreto, pero queda en evidencia externa al repositorio). | Evidencia operador |
 | P-03 | **Grants de mínimo privilegio Fase 3 aplicados vía Terraform**: commiteados en `983e7c0` y aplicados con **9 altas; 0 cambios; 0 destrucciones**. | Commiteado en el repositorio + apply reportado |
 | P-04 | **Separación humana/SP:** el propietario UC humano conserva **`Service principal: User`** sobre el SP (supervisión operativa, sin implicar rol en plano de datos); el SP tiene **solo `Can View`** sobre el subárbol `files` del bundle. | Evidencia operador |
 
 ## 3. Despliegue del job del bundle
 
-- Despliegue **manual únicamente, sin schedule**; job ID `87818861015609`.
+- Despliegue **manual únicamente, sin schedule**; job ID `<silver-materialization-job>` (marcador semántico; el valor real no se publica en Git).
 - **Topología de dos tareas:** (1) tarea de materialización — crea/escribe las tablas gestionadas de salida con `replaceWhere` por scope y escribe `silver.materialization_run_report` al final como marcador de completitud; (2) tarea de **verificación read-only dependiente** — solo `SELECT`/`DESCRIBE` fijos contra las salidas.
 - El run-as es el SP dedicado de Silver (P-02); las tablas gestionadas las crea el SP del job, nunca Terraform.
 
@@ -39,12 +39,12 @@ Alcance declarado sin ambigüedad: **no** es streaming, CDC, SCD, incremental ge
 
 | Hecho | Detalle |
 | --- | --- |
-| Run `673784339635889` | Falló **antes de tocar Bronze** por falta de lectura de workspace-files del bundle. |
+| Run `<failed-pre-access-run>` | Falló **antes de tocar Bronze** por falta de lectura de workspace-files del bundle. |
 | Impacto | **No creó outputs** ni mutó estado: sin tablas, sin filas y sin reporte parcial. |
 
 Lección operativa registrada: el fallo se produjo en la fase de bootstrap de archivos de workspace, no en la lógica del pipeline ni contra datos.
 
-## 5. Run exitoso `747823646010833` — controles de resultado exactos
+## 5. Run exitoso (`<successful-silver-run>`) — controles de resultado exactos
 
 Run exitoso sobre la instantánea fija `DEMO-001`, con verificación read-only posterior en verde:
 

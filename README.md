@@ -2,6 +2,22 @@
 
 Proyecto de portfolio para diseñar un e-commerce ficticio de material de tenis de mesa y su plataforma analítica gobernada en Azure. El objetivo no es operar una tienda real: es demostrar cómo transformar eventos de venta sintéticos en métricas fiables para negocio, manteniendo el acceso a datos personales bajo control.
 
+## Para reclutadores: el resultado en 30 segundos
+
+**Métrica de negocio publicada y privacy-safe:** categoría **pala** / región **ES-MD** / canal **web** = **640,00 EUR** de ingresos netos, **5 pedidos**, **0 líneas reembolsadas** — la única celda que supera el umbral k ≥ 5 (controles previos a supresión: 812,20 EUR / 13 / 2). Recorrido completo contrato → Bronze → Silver/cuarentena → Gold sobre Azure Databricks + Unity Catalog + Terraform, con **287 pruebas locales en verde**:
+
+```powershell
+py -m unittest discover -s tests -v
+```
+
+- [Caso de negocio y la métrica](docs/portfolio/01-caso-negocio.md)
+- [Corrección del pipeline: dos incidencias reales en cloud y su arreglo versionado](docs/portfolio/02-correccion-del-pipeline.md)
+- [Jobs de Databricks y gobierno UC: bundle manual serverless, SP separado, mínimo privilegio](docs/portfolio/03-databricks-jobs-y-ejecucion.md) · [IaC de gobierno](docs/portfolio/04-unity-catalog-y-gobierno.md)
+- **Dossier completo:** [docs/portfolio/README.md](docs/portfolio/README.md) — índice, limitaciones declaradas y [radiografía técnica con rutas versionadas](docs/portfolio/06-radiografia-del-proyecto.md).
+- **Demo estático:** [demo/index.html](demo/index.html) (contenido fijo del resultado, sin llamadas cloud, sin SQL Warehouse ni Power BI; instrucciones en [demo/README.md](demo/README.md)).
+
+**Honestidad de alcance:** los resultados cloud de este proyecto (ingesta Bronze única de `DEMO-001` y hito Silver, con Silver 15/10/7, cuarentena 6 y estado `COMPLETED_WITH_QUARANTINE`) son **evidencia reportada por el operador** — observación humana y salidas de consola del run documentado, ni reproducibles desde Git ni evidencia de auditoría formal. Lo que este repositorio acredita por sí mismo es lo versionado: código, bundle, Terraform, fixture y las 287 pruebas locales. Los datos son **100 % sintéticos**: los campos con forma de PII del fixture (correo, teléfono, identificadores de cliente) son **datos de prueba generados determinísticamente** (dominios de prueba `*.example.test`, teléfonos ficticios `+3400…`), nunca personas ni contactos reales. **Fase 2 no está formalmente cerrada** (cierre por excepción sin firmar) y Bronze `DEMO-001` quedó congelado tras su única ingesta. **No iniciados:** SQL Warehouse, Power BI, dashboard en vivo, CI/CD, monitorización, máscaras dinámicas ni prueba de identidad de consumidor. Las **capturas de pantalla del dossier no existen todavía** (pendientes de captura manual autenticada y redacción: [plan de evidencia](docs/portfolio/evidence/README.md)).
+
 > **Estado actual:** Fases 0 y 1 cerradas según evidencia reportada por el usuario. **Fase 2 — la ingesta Bronze del lote `DEMO-001` se ejecutó en cloud una única vez y fue verificada de forma independiente en lectura (evidencia reportada por el operador); la validación completa sigue sin formalizarse.** El documento de cierre por excepción ([borrador sin firmar](docs/fase-2/EVIDENCIA_CLOUD_DEMO-001_CIERRE_EXCEPCION_BORRADOR.md)) permanece `SIN FIRMAR` — RE-PA-1/RE-PA-2 sin evidencia en su ventana y P-2/P-3 diferidos —, ningún gate GF2 queda firmado y **no se declara Fase 2 cerrada**. Bronze queda **congelado**: sin re-ejecuciones, sin mutaciones de `landing` y sin reseteo de checkpoints.
 >
 > **Fase 3 — hito Silver `DEMO-001` ejecutado en cloud y verificado en lectura según reporte del operador** (precondiciones, despliegue, runs, controles y límites en el [acta de evidencia](docs/fase-3/ACTA_EVIDENCIA_CLOUD_DEMO-001.md)): Silver orders/customers/products **15/10/7** filas, cuarentena con **6 rechazos esperados**, Gold con **una única celda privacy-safe vigente** (pala / ES-MD / web = **640,00 EUR** / **5 pedidos** / **0 líneas reembolsadas**, sin PII ni identificadores), estado de run `COMPLETED_WITH_QUARANTINE` y **todos los chequeos del verificador read-only en verde**. Alcance acotado y declarado: instantánea completa del lote vía `replaceWhere` por scope con timestamp de auditoría determinista — **no** es streaming/CDC/SCD/incremental genérico/MERGE y **no** es atómico entre tablas de salida. **Sin iniciar:** SQL Warehouse, Power BI, dashboard, CI/runbooks finales y diseño incremental genérico/CDC.

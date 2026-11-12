@@ -1,6 +1,6 @@
 # DEMO-001 · Lakehouse gobernado
 
-Demostrador visual estático con métricas agregadas de la instantánea sintética DEMO-001. El contenido es evidencia fija, no una aplicación conectada ni datos en tiempo real. No realiza llamadas cloud, no usa SQL Warehouse ni Power BI y no requiere instalación de paquetes.
+Demostrador visual estático con métricas agregadas de la instantánea sintética DEMO-001. Las cifras resumen un hito cloud reportado por el operador; esta presentación no es verificación independiente ni prueba reproducible. El contenido es evidencia fija, no una aplicación conectada ni datos en tiempo real. No realiza llamadas cloud, no usa SQL Warehouse ni Power BI y no requiere instalación de paquetes.
 
 ## Abrir en Windows
 
@@ -18,6 +18,6 @@ Demostrador visual estático con métricas agregadas de la instantánea sintéti
 
 3. Abre `http://127.0.0.1:8000/` en el navegador. Para detener el servidor, vuelve a la terminal y pulsa `Ctrl+C`.
 
-No hace falta `npm install`. Los datos mostrados están escritos en la página y son una instantánea estática; el rótulo de verificación es una referencia de evidencia, no una consulta en directo.
+No hace falta `npm install`. Los datos mostrados están escritos en la página y son una instantánea determinista y estática. Las capturas redactadas de Databricks se enlazarán desde el dossier cuando se recopilen manualmente; aún no están adjuntas aquí.
 
 En la sección de resultados, usa los botones **Gold publicado** y **Evidencia de calidad** para cambiar de vista. Funcionan con teclado y anuncian la selección a lectores de pantalla.
