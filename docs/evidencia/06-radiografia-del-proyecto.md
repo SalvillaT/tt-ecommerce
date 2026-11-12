@@ -60,4 +60,4 @@ Python 3.13 (stdlib para el núcleo y el generador) · PySpark/Delta (ejecución
 
 Documentación de detalle: [codemap raíz](../../codemap.md) · [acta de evidencia del hito Silver](../fase-3/ACTA_EVIDENCIA_CLOUD_DEMO-001.md) · [borrador de cierre de Fase 2 (sin firmar)](../fase-2/EVIDENCIA_CLOUD_DEMO-001_CIERRE_EXCEPCION_BORRADOR.md).
 
-Volver al [índice del dossier](README.md).
+Volver al [índice](README.md).

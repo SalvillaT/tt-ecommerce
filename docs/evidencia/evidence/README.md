@@ -1,6 +1,6 @@
-# Evidencia visual del dossier — plan de captura (PENDIENTE DE OPERADOR)
+# Evidencia visual — plan de captura (PENDIENTE DE OPERADOR)
 
-Las capturas de pantalla de este dossier **no existen todavía**. Deben ser capturadas **manualmente por un usuario autenticado** del workspace, redactadas antes de versionar y etiquetadas como **`operator-reported`** (son capturas de una ejecución ya realizada, no re-ejecuciones ni consultas en directo). En esta carpeta solo hay un `.gitkeep`: **nunca** se versiona una imagen provisional o falsa.
+Las capturas de pantalla de esta documentación **no existen todavía**. Deben ser capturadas **manualmente por un usuario autenticado** del workspace, redactadas antes de versionar y etiquetadas como **`operator-reported`** (son capturas de una ejecución ya realizada, no re-ejecuciones ni consultas en directo). En esta carpeta solo hay un `.gitkeep`: **nunca** se versiona una imagen provisional o falsa.
 
 Reglas no negociables:
 
@@ -11,7 +11,7 @@ Reglas no negociables:
 
 ## Checklist de captura (6 capturas)
 
-Para cada una: abrir la ubicación indicada con sesión autenticada → capturar pantalla completa del panel → redactar según su lista → guardar con el nombre exacto en `docs/portfolio/evidence/screenshots/` → registrar su estado en [`evidence-index.yml`](evidence-index.yml).
+Para cada una: abrir la ubicación indicada con sesión autenticada → capturar pantalla completa del panel → redactar según su lista → guardar con el nombre exacto en `docs/evidencia/evidence/screenshots/` → registrar su estado en [`evidence-index.yml`](evidence-index.yml).
 
 ### 1. `01-gold-celda-publicada.png` — Celda Gold publicada
 
@@ -52,5 +52,5 @@ Para cada una: abrir la ubicación indicada con sesión autenticada → capturar
 ## Estado general
 
 - Estado de las 6 capturas: **`pending_operator_capture`** (ver [`evidence-index.yml`](evidence-index.yml)).
-- Hasta que existan y estén redactadas, el dossier funciona con la evidencia textual versionada: [acta del hito Silver](../../fase-3/ACTA_EVIDENCIA_CLOUD_DEMO-001.md) y [borrador de cierre de Fase 2 (sin firmar)](../../fase-2/EVIDENCIA_CLOUD_DEMO-001_CIERRE_EXCEPCION_BORRADOR.md).
+- Hasta que existan y estén redactadas, esta documentación se apoya en la evidencia textual versionada: [acta del hito Silver](../../fase-3/ACTA_EVIDENCIA_CLOUD_DEMO-001.md) y [borrador de cierre de Fase 2 (sin firmar)](../../fase-2/EVIDENCIA_CLOUD_DEMO-001_CIERRE_EXCEPCION_BORRADOR.md).
 - Este plan no inventa `captured_at`, hashes ni archivos: cada campo se rellena solo cuando la captura existe.

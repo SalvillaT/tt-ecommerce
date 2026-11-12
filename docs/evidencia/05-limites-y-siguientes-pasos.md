@@ -1,6 +1,6 @@
 # 05 — Límites y siguientes pasos
 
-Un portfolio creíble declara tanto lo que **no** tiene como lo que tiene. Esta es la lista completa de límites, con su estado exacto.
+Esta es la lista completa de límites del proyecto, con su estado exacto: se declara tanto lo implementado como lo que no.
 
 ## Límites de evidencia (los más importantes)
 
@@ -30,10 +30,10 @@ Un portfolio creíble declara tanto lo que **no** tiene como lo que tiene. Esta 
 ## Siguientes pasos (roadmap real)
 
 1. **Formalizar el cierre de Fase 2**: rellenar bitácoras desde la evidencia del operador y firma externa de la autoridad humana (waiver de RE-PA-1/RE-PA-2 y ejecución de P-2/P-3 si se exige). Cualquier ingesta futura requiere sus propios gates.
-2. **Completar la evidencia visual** de este dossier con las 6 capturas autenticadas y redactadas ([evidence/README.md](evidence/README.md)).
+2. **Completar la evidencia visual** de esta documentación con las 6 capturas autenticadas y redactadas ([evidence/README.md](evidence/README.md)).
 3. **Fase 4**: matriz de acceso, vistas aprobadas, máscaras dinámicas y verificación por identidad real (positivos y negativos).
 4. **Fase 5**: gate de coste → SQL Warehouse opt-in → informe Power BI inicial (Import), con conjunto de control.
 5. **Fase 6**: CI (formato, `terraform validate`, tests sin credenciales, revisión de secretos), runbook final y métricas operativas.
 6. **Generalizar Silver/Gold**: diseño incremental genérico (con su idempotencia y ventana) solo tras decidir frescura y coste.
 
-Volver al [índice del dossier](README.md).
+Volver al [índice](README.md).

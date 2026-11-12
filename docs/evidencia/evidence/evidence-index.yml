@@ -1,7 +1,7 @@
-# Índice de evidencia visual del dossier (docs/portfolio/evidence/)
+# Índice de evidencia visual (docs/evidencia/evidence/)
 # Estado: TODAS las capturas PENDIENTES de captura manual autenticada por el
 # operador (pending_operator_capture). No se registran captured_at, hashes ni
-# archivos que no existan. Integridad: toda la evidencia cloud de este dossier
+# archivos que no existan. Integridad: toda la evidencia cloud de este proyecto
 # es operator-reported (observación humana del run documentado; salidas de
 # consola), no reproducible desde Git ni evidencia de auditoría formal.
 # Reglas de redacción: ver README.md de esta carpeta. Nunca versionar una
@@ -84,7 +84,7 @@ entries:
       - rutas de workspace completas con cuentas
     related_docs:
       - ../03-databricks-jobs-y-ejecucion.md
-      - ../../resources/silver_demo_001_job.yml
+      - ../../../resources/silver_demo_001_job.yml
     integrity_label: operator-reported
 
   - id: EV-04
@@ -131,7 +131,7 @@ entries:
     related_docs:
       - ../01-caso-negocio.md
       - ../03-databricks-jobs-y-ejecucion.md
-      - ../../scripts/verify_silver_demo_001.py
+      - ../../../scripts/verify_silver_demo_001.py
     integrity_label: operator-reported
 
   - id: EV-06
@@ -155,6 +155,6 @@ entries:
       - URL completa del workspace
     related_docs:
       - ../04-unity-catalog-y-gobierno.md
-      - ../../infra/databricks/main.tf
-      - ../../infra/databricks/codemap.md
+      - ../../../infra/databricks/main.tf
+      - ../../../infra/databricks/codemap.md
     integrity_label: operator-reported

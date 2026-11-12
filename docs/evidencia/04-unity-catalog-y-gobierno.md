@@ -30,7 +30,7 @@ Mapa detallado por root: [`infra/codemap.md`](../../infra/codemap.md) y [`infra/
 - El job queda fuera de `_staging`: la subida y promoción del lote son exclusivas del productor/operador.
 - Las tablas de salida las **crea el job** en su primera ejecución (primera escritura = propiedad), no un administrador ni Terraform.
 
-## Lo que este dossier NO reclama en gobierno
+## Lo que esta documentación NO reclama en gobierno
 
 - **No** hay máscaras dinámicas de columna configuradas (trabajo de Fase 4).
 - **No** hay prueba de identidad de consumidor (analistas/BI leyendo con permisos reales): la matriz de Fase 4 no se ha ejecutado.
